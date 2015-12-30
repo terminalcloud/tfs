@@ -5,6 +5,8 @@ extern crate scoped_threadpool;
 extern crate rand;
 extern crate uuid;
 
+use uuid::Uuid;
+
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::io;
 
@@ -19,15 +21,23 @@ mod impls;
 pub struct File;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Chunk(String);
+pub struct Chunk(Uuid);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct FileDescriptor(String);
+pub struct FileDescriptor(Uuid);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ChunkDescriptor {
     file: FileDescriptor,
     chunk: Chunk
+}
+
+impl ChunkDescriptor {
+    fn not_found(&self, version: Option<&Version>) -> io::Error {
+        io::Error::new(io::ErrorKind::NotFound,
+                       format!("No object for {:?}-{:?}-{:?}",
+                               self.file, self.chunk, version))
+    }
 }
 
 #[derive(Debug)]

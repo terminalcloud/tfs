@@ -55,11 +55,8 @@ impl InnerMockStorage {
         self.storage
             .get(chunk)
             .and_then(|chunk_map| chunk_map.get(&version.as_ref().map(|v| v.load())))
-            .ok_or_else(|| {
-                io::Error::new(io::ErrorKind::NotFound,
-                               format!("No object for {:?}-{:?}",
-                                       chunk, version.clone()))
-            }).and_then(|object| {
+            .ok_or_else(|| chunk.not_found(version.as_ref()))
+            .and_then(|object| {
                 // TODO: Maybe be more flexible here, or just
                 // always ensure this is the case.
                 assert_eq!(object.len(), buf.len());
@@ -122,7 +119,7 @@ fn gen_random_objects(num_objects: usize,
                       chunk_size: usize,
                       num_versions: usize) -> HashMap<Chunk, Vec<Vec<u8>>> {
     (0..num_objects).map(|_| {
-        (Chunk(Uuid::new_v4().to_string()),
+        (Chunk(Uuid::new_v4()),
          vec![gen_random_chunk(chunk_size); num_versions])
     }).collect::<HashMap<Chunk, Vec<Vec<u8>>>>()
 }
@@ -167,7 +164,7 @@ impl<S: Storage> StorageFuzzer<S> {
         let mut pool = Pool::new(objects.len() as u32);
 
         pool.scoped(|scope| {
-            let file = Uuid::new_v4().to_string();
+            let file = Uuid::new_v4();
             for (chunk, versions) in objects {
                 let file = file.clone();
 
@@ -221,9 +218,9 @@ impl<S: Storage> StorageFuzzer<S> {
 
 #[cfg(test)]
 mod test {
-    use {Storage, Cache, ChunkDescriptor, FileDescriptor, Chunk};
-
+    use uuid::Uuid;
     use mock::{MockStorage, StorageFuzzer};
+    use {Storage, Cache, ChunkDescriptor, FileDescriptor, Chunk};
 
     #[test]
     fn fuzz_mock_storage() {
@@ -239,8 +236,8 @@ mod test {
         let storage = MockStorage::new();
 
         let chunk = ChunkDescriptor {
-            file: FileDescriptor("f".into()),
-            chunk: Chunk(::rand::random::<usize>().to_string())
+            file: FileDescriptor(Uuid::new_v4()),
+            chunk: Chunk(Uuid::new_v4())
         };
         let mut buf = vec![0; data.len()];
         storage.create(&chunk, None, data).unwrap();
@@ -248,8 +245,8 @@ mod test {
         assert_eq!(&buf, data);
 
         let chunk = ChunkDescriptor {
-            file: FileDescriptor("b".into()),
-            chunk: Chunk(::rand::random::<usize>().to_string())
+            file: FileDescriptor(Uuid::new_v4()),
+            chunk: Chunk(Uuid::new_v4())
         };
         let mut buf = vec![0; data.len()];
         storage.create(&chunk, None, &data[..5]).unwrap();

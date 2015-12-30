@@ -31,16 +31,13 @@ impl Fs {
         iter::once(&self.inner.local as &Cache)
             .chain(self.inner.caches.iter().map(|c| &**c))
             .chain(iter::once(&self.inner.storage as &Cache))
-            // TODO: Replace with some not-found error.
-            .fold(Ok(0), |res, cache| {
+            .fold(Err(chunk.not_found(None)), |res, cache| {
                 res.or_else(|_| cache.read(chunk, None, buf))
             })
     }
 
     pub fn write(&self, chunk: &ChunkDescriptor, data: &[u8]) -> io::Result<()> {
-        try!(self.inner.local.try_write_mutable_chunk(chunk, data));
-
-        Ok(())
+        self.inner.local.try_write_mutable_chunk(chunk, data)
     }
 
     pub fn freeze(&self, file: &FileDescriptor) -> io::Result<()> {
