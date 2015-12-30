@@ -2,7 +2,7 @@
 
 extern crate fuse;
 
-use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::io;
 
 pub mod fs;
@@ -13,11 +13,22 @@ mod lru;
 mod mock;
 mod impls;
 
-pub struct FileDescriptor;
 pub struct File;
 pub struct Chunk;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FileDescriptor;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ChunkDescriptor;
+
+#[derive(Debug)]
 pub struct Version(AtomicUsize);
+
+impl Version {
+    fn load(&self) -> usize { self.0.load(Ordering::SeqCst) }
+    fn increment(&self) -> usize { self.0.fetch_add(1, Ordering::SeqCst) }
+}
 
 pub trait Cache: Sync {
     fn read(&self, chunk: &ChunkDescriptor, version: Option<Version>,
