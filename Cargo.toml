@@ -4,4 +4,8 @@ version = "0.1.0"
 authors = ["Jonathan Reem <jonathan.reem@gmail.com>"]
 
 [dependencies]
-fuse = "*"
+fuse = "0.2"
+scoped_threadpool = "0.1"
+rand = "0.3"
+uuid = "0.1"
+
