@@ -4,6 +4,10 @@ extern crate fuse;
 extern crate scoped_threadpool;
 extern crate rand;
 extern crate uuid;
+extern crate libc;
+
+#[cfg(test)]
+extern crate tempfile;
 
 use uuid::Uuid;
 
@@ -13,6 +17,7 @@ use std::io;
 pub mod fs;
 pub mod s3;
 pub mod p2p;
+pub mod sparse;
 pub mod mock;
 
 mod lru;
@@ -20,8 +25,8 @@ mod impls;
 
 pub struct File;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Chunk(u64);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Chunk(usize);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FileDescriptor(Uuid);

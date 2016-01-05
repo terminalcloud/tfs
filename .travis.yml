@@ -1,4 +1,5 @@
 language: rust
+os: linux
 addons:
     apt:
         packages:
