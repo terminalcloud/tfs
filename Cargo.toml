@@ -8,4 +8,8 @@ fuse = "0.2"
 scoped_threadpool = "0.1"
 rand = "0.3"
 uuid = "0.1"
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "1.1"
 
