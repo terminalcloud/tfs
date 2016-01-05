@@ -119,7 +119,7 @@ fn gen_random_objects(num_objects: usize,
                       chunk_size: usize,
                       num_versions: usize) -> HashMap<Chunk, Vec<Vec<u8>>> {
     (0..num_objects).map(|_| {
-        (Chunk(Uuid::new_v4()),
+        (Chunk(::rand::random()),
          vec![gen_random_chunk(chunk_size); num_versions])
     }).collect::<HashMap<Chunk, Vec<Vec<u8>>>>()
 }
@@ -237,7 +237,7 @@ mod test {
 
         let chunk = ChunkDescriptor {
             file: FileDescriptor(Uuid::new_v4()),
-            chunk: Chunk(Uuid::new_v4())
+            chunk: Chunk(::rand::random())
         };
         let mut buf = vec![0; data.len()];
         storage.create(&chunk, None, data).unwrap();
@@ -246,7 +246,7 @@ mod test {
 
         let chunk = ChunkDescriptor {
             file: FileDescriptor(Uuid::new_v4()),
-            chunk: Chunk(Uuid::new_v4())
+            chunk: Chunk(::rand::random())
         };
         let mut buf = vec![0; data.len()];
         storage.create(&chunk, None, &data[..5]).unwrap();

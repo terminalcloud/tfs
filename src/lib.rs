@@ -21,7 +21,7 @@ mod impls;
 pub struct File;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Chunk(Uuid);
+pub struct Chunk(u64);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FileDescriptor(Uuid);
