@@ -12,6 +12,13 @@ impl LruFs {
         Ok(())
     }
 
+    pub fn try_write_immutable_chunk(&self, chunk: &ChunkDescriptor,
+                                     data: &[u8]) -> io::Result<()> {
+        // Write locally if not already there, evict if out of space.
+        // No versioning or pinning needed.
+        Ok(())
+    }
+
     pub fn try_write_mutable_chunk(&self, chunk: &ChunkDescriptor,
                                    data: &[u8]) -> io::Result<()> {
         // Write locally: (if out of space, flush/delete unpinned data)
