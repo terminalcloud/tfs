@@ -110,6 +110,7 @@ impl Into<SparseFile> for VersionedSparseFile {
     }
 }
 
+/// Extension methods available on sparse files.
 pub trait SparseFileExt {
     /// Punch a hole in the file with the given size at the passed offset.
     fn punch(&mut self, offset: usize, size: usize) -> io::Result<()>;
@@ -121,6 +122,7 @@ pub trait SparseFileExt {
     fn pwrite(&mut self, offset: usize, data: &[u8]) -> io::Result<usize>;
 }
 
+// Shim for converting C-style errors to io::Errors.
 fn cvt(err: i64) -> io::Result<usize> {
     if err < 0 {
         Err(io::Error::last_os_error())
@@ -221,7 +223,7 @@ mod test {
                 sparse_file.read(chunk, write_buf).unwrap();
                 assert_eq!(&*write_buf, &**buffer);
 
-                sparse_file.evict(chunk);
+                sparse_file.evict(chunk).unwrap();
                 sparse_file.read(chunk, write_buf).unwrap();
                 assert_eq!(&*write_buf, &[0u8; BLOCK_SIZE] as &[u8]);
             }

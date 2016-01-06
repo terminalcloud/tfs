@@ -169,7 +169,7 @@ impl<S: Storage> StorageFuzzer<S> {
                 let file = file.clone();
 
                 // The test that gets run for each object.
-                let check_object = move || {
+                scope.execute(move || {
                     let chunk_descriptor = ChunkDescriptor {
                         file: FileDescriptor(file.clone()),
                         chunk: chunk.clone()
@@ -196,10 +196,7 @@ impl<S: Storage> StorageFuzzer<S> {
                     self.storage.promote(&chunk_descriptor).unwrap();
                     self.storage.read(&chunk_descriptor, None, &mut buffer).unwrap();
                     assert_eq!(&buffer, versions.last().unwrap())
-                };
-
-                // TODO: This unsafe block can go away in a few weeks.
-                unsafe { scope.execute(check_object) };
+                });
             }
         });
     }
