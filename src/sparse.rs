@@ -160,7 +160,7 @@ impl SparseFileExt for File {
 
 #[cfg(test)]
 mod test {
-    use tempfile::NamedTempFile;
+    use tempfile::tempfile;
 
     use sparse::{SparseFileExt, SparseFile, BLOCK_SIZE};
     use {Chunk};
@@ -173,7 +173,7 @@ mod test {
 
     #[test]
     fn test_sparse_file_ext() {
-        let mut file = NamedTempFile::new().unwrap();
+        let mut file = tempfile().unwrap();
         file.pwrite(50, &[1, 2, 3, 4, 5]).unwrap();
         file.pwrite(100, &[7, 6, 5, 4, 3, 2, 1]).unwrap();
 
@@ -199,10 +199,7 @@ mod test {
 
     #[test]
     fn test_sparse_file_write_read_evict() {
-        let temp_file = NamedTempFile::new().unwrap();
-        let temp_file_handle = OpenOptions::new()
-            .read(true).write(true).open(temp_file.path()).unwrap();
-        let mut sparse_file = SparseFile::new(temp_file_handle);
+        let mut sparse_file = SparseFile::new(tempfile().unwrap());
 
         // Run the test for several sets of chunks.
         for _ in 0..4 {

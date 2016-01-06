@@ -9,7 +9,8 @@ scoped_threadpool = "0.1"
 rand = "0.3"
 uuid = "0.1"
 libc = "0.2"
+bit-vec = "0.4"
 
 [dev-dependencies]
-tempfile = "1.1"
+tempfile = "2.0"
 
