@@ -1,4 +1,3 @@
-use std::io;
 use {Storage, Cache, ChunkDescriptor, Version};
 
 pub struct S3Storage {
@@ -7,23 +6,23 @@ pub struct S3Storage {
 
 impl Storage for S3Storage {
     fn create(&self, chunk: &ChunkDescriptor, version: Option<Version>,
-              data: &[u8]) -> io::Result<()> {
+              data: &[u8]) -> ::Result<()> {
          Ok(())
     }
 
-    fn promote(&self, chunk: &ChunkDescriptor) -> io::Result<()> {
+    fn promote(&self, chunk: &ChunkDescriptor) -> ::Result<()> {
         Ok(())
     }
 
     fn delete(&self, chunk: &ChunkDescriptor,
-              version: Option<Version>) -> io::Result<()> {
+              version: Option<Version>) -> ::Result<()> {
         Ok(())
     }
 }
 
 impl Cache for S3Storage {
     fn read(&self, chunk: &ChunkDescriptor, version: Option<Version>,
-            buf: &mut [u8]) -> io::Result<usize> {
+            buf: &mut [u8]) -> ::Result<usize> {
         Ok(buf.len())
     }
 }

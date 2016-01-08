@@ -28,44 +28,44 @@ impl MockStorage {
 
 impl Cache for MockStorage {
     fn read(&self, chunk: &ChunkDescriptor, version: Option<Version>,
-            mut buf: &mut [u8]) -> io::Result<usize> {
+            mut buf: &mut [u8]) -> ::Result<usize> {
         self.inner.read().unwrap().read(chunk, version, buf)
     }
 }
 
 impl Storage for MockStorage {
     fn create(&self, chunk: &ChunkDescriptor, version: Option<Version>,
-              data: &[u8]) -> io::Result<()> {
+              data: &[u8]) -> ::Result<()> {
         self.inner.write().unwrap().create(chunk, version, data)
     }
 
-    fn promote(&self, chunk: &ChunkDescriptor) -> io::Result<()> {
+    fn promote(&self, chunk: &ChunkDescriptor) -> ::Result<()> {
         self.inner.write().unwrap().promote(chunk)
     }
 
     fn delete(&self, chunk: &ChunkDescriptor,
-              version: Option<Version>) -> io::Result<()> {
+              version: Option<Version>) -> ::Result<()> {
         self.inner.write().unwrap().delete(chunk, version)
     }
 }
 
 impl InnerMockStorage {
     fn read(&self, chunk: &ChunkDescriptor, version: Option<Version>,
-            mut buf: &mut [u8]) -> io::Result<usize> {
+            mut buf: &mut [u8]) -> ::Result<usize> {
         self.storage
             .get(chunk)
             .and_then(|chunk_map| chunk_map.get(&version.as_ref().map(|v| v.load())))
-            .ok_or_else(|| chunk.not_found(version.as_ref()))
+            .ok_or_else(|| ::Error::NotFound)
             .and_then(|object| {
                 // TODO: Maybe be more flexible here, or just
                 // always ensure this is the case.
                 assert_eq!(object.len(), buf.len());
-                buf.write(&object)
+                Ok(try!(buf.write(&object)))
             })
     }
 
     fn create(&mut self, chunk: &ChunkDescriptor, version: Option<Version>,
-              data: &[u8]) -> io::Result<()> {
+              data: &[u8]) -> ::Result<()> {
         self.storage
             .entry(chunk.clone())
             .or_insert_with(|| HashMap::new())
@@ -74,7 +74,7 @@ impl InnerMockStorage {
         Ok(())
     }
 
-    fn promote(&mut self, chunk: &ChunkDescriptor) -> io::Result<()> {
+    fn promote(&mut self, chunk: &ChunkDescriptor) -> ::Result<()> {
         self.storage.get(chunk)
             .unwrap_or(&HashMap::new())
             .keys().cloned().max()
@@ -98,7 +98,7 @@ impl InnerMockStorage {
     }
 
     fn delete(&mut self, chunk: &ChunkDescriptor,
-              version: Option<Version>) -> io::Result<()> {
+              version: Option<Version>) -> ::Result<()> {
         self.storage
             .get_mut(&chunk)
             .unwrap_or(&mut HashMap::new())

@@ -121,11 +121,11 @@ impl VersionedSparseFile {
             .map(|v| v.load())
     }
 
-    pub fn read(&self, chunk: Chunk, buf: &mut [u8]) -> io::Result<()> {
+    pub fn read(&self, chunk: Chunk, buf: &mut [u8]) -> ::Result<()> {
         Ok(())
     }
 
-    pub fn write(&mut self, chunk: Chunk, version: Version, data: &[u8]) -> io::Result<()> {
+    pub fn write(&mut self, chunk: Chunk, version: Version, data: &[u8]) -> ::Result<()> {
         Ok(())
     }
 }

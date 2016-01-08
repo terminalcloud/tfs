@@ -20,11 +20,11 @@ impl Fs {
         unimplemented!()
     }
 
-    pub fn init(&self) -> io::Result<()> {
+    pub fn init(&self) -> ::Result<()> {
         self.inner.local.init_flush_thread(self.clone())
     }
 
-    pub fn read(&self, chunk: &ChunkDescriptor, buf: &mut [u8]) -> io::Result<usize> {
+    pub fn read(&self, chunk: &ChunkDescriptor, buf: &mut [u8]) -> ::Result<usize> {
         // Try all of our caches in order, starting with local storage
         // and ending with cold storage.
         //
@@ -34,7 +34,7 @@ impl Fs {
         iter::once(&self.inner.local as &Cache)
             .chain(self.inner.caches.iter().map(|c| &**c))
             .chain(iter::once(&self.inner.storage as &Cache))
-            .fold(Err(chunk.not_found(None)), |res, cache| {
+            .fold(Err(::Error::NotFound), |res, cache| {
                 res.or_else(|_| cache.read(chunk, None, buf))
             }).and_then(|u| {
                 try!(self.inner.local.try_write_immutable_chunk(&chunk, buf));
@@ -42,11 +42,11 @@ impl Fs {
             })
     }
 
-    pub fn write(&self, chunk: &ChunkDescriptor, data: &[u8]) -> io::Result<()> {
+    pub fn write(&self, chunk: &ChunkDescriptor, data: &[u8]) -> ::Result<()> {
         self.inner.local.try_write_mutable_chunk(chunk, data)
     }
 
-    pub fn freeze(&self, file: &FileDescriptor) -> io::Result<()> {
+    pub fn freeze(&self, file: &FileDescriptor) -> ::Result<()> {
         // For all pinned chunks:
         //   - upload non-versioned chunk to unpin
         // For all unpinned chunks:

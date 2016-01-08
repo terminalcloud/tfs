@@ -41,14 +41,6 @@ pub struct ChunkDescriptor {
     chunk: Chunk
 }
 
-impl ChunkDescriptor {
-    fn not_found(&self, version: Option<&Version>) -> io::Error {
-        io::Error::new(io::ErrorKind::NotFound,
-                       format!("No object for {:?}-{:?}-{:?}",
-                               self.file, self.chunk, version))
-    }
-}
-
 #[derive(Debug)]
 pub struct Version(AtomicUsize);
 
@@ -66,14 +58,14 @@ impl Clone for Version {
 
 pub trait Cache: Sync {
     fn read(&self, chunk: &ChunkDescriptor, version: Option<Version>,
-            buf: &mut [u8]) -> io::Result<usize>;
+            buf: &mut [u8]) -> ::Result<usize>;
 }
 
 pub trait Storage: Cache {
     fn create(&self, chunk: &ChunkDescriptor, version: Option<Version>,
-              data: &[u8]) -> io::Result<()>;
-    fn promote(&self, chunk: &ChunkDescriptor) -> io::Result<()>;
+              data: &[u8]) -> ::Result<()>;
+    fn promote(&self, chunk: &ChunkDescriptor) -> ::Result<()>;
     fn delete(&self, chunk: &ChunkDescriptor,
-              version: Option<Version>) -> io::Result<()>;
+              version: Option<Version>) -> ::Result<()>;
 }
 
