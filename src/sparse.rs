@@ -193,14 +193,11 @@ impl SparseFileExt for File {
 mod test {
     use tempfile::tempfile;
 
-    use sparse::{SparseFileExt, SparseFile, BLOCK_SIZE};
+    use sparse::{SparseFileExt, SparseFile, BLOCK_SIZE,
+                 VersionedSparseFile};
     use {Chunk};
 
-    use std::fs::{OpenOptions, File};
-
-    fn gen_random_chunk() -> Vec<u8> {
-        vec![::rand::random(); BLOCK_SIZE]
-    }
+    use std::sync::RwLock;
 
     #[test]
     fn test_sparse_file_ext() {
@@ -235,12 +232,14 @@ mod test {
         const INDEX_MULTIPLIER: usize = 20;
         const MAX_CHUNKS: usize = CHUNKS_PER_RUN * INDEX_MULTIPLIER;
 
+        use util::test::gen_random_chunk;
+
         let mut sparse_file = SparseFile::new(tempfile().unwrap(),
                                               MAX_CHUNKS);
 
         // Run the test for several sets of chunks.
         for _ in 0..RUNS {
-            let buffers = vec![gen_random_chunk(); CHUNKS_PER_RUN];
+            let buffers = vec![gen_random_chunk(BLOCK_SIZE); CHUNKS_PER_RUN];
 
             // Write all the chunks.
             for (index, buffer) in buffers.iter().enumerate() {

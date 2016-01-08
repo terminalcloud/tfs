@@ -7,6 +7,7 @@ use std::sync::RwLock;
 use std::io::{self, Write};
 use std::mem;
 
+use util::test::gen_random_objects;
 use {Storage, Cache, ChunkDescriptor, Version, Chunk, FileDescriptor};
 
 pub struct MockStorage {
@@ -109,19 +110,6 @@ impl InnerMockStorage {
 
 pub struct StorageFuzzer<S> {
     storage: S
-}
-
-fn gen_random_chunk(chunk_size: usize) -> Vec<u8> {
-    vec![::rand::random::<u8>(); chunk_size]
-}
-
-fn gen_random_objects(num_objects: usize,
-                      chunk_size: usize,
-                      num_versions: usize) -> HashMap<Chunk, Vec<Vec<u8>>> {
-    (0..num_objects).map(|_| {
-        (Chunk(::rand::random()),
-         vec![gen_random_chunk(chunk_size); num_versions])
-    }).collect::<HashMap<Chunk, Vec<Vec<u8>>>>()
 }
 
 impl<S: Storage> StorageFuzzer<S> {

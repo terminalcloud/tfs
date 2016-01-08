@@ -26,6 +26,7 @@ pub mod error;
 
 mod lru;
 mod impls;
+mod util;
 
 pub struct File;
 
