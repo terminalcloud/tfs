@@ -5,6 +5,7 @@ extern crate scoped_threadpool;
 extern crate rand;
 extern crate uuid;
 extern crate libc;
+extern crate bit_vec;
 
 #[cfg(test)]
 extern crate tempfile;
@@ -14,11 +15,14 @@ use uuid::Uuid;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::io;
 
+pub use error::{Error, Result};
+
 pub mod fs;
 pub mod s3;
 pub mod p2p;
 pub mod sparse;
 pub mod mock;
+pub mod error;
 
 mod lru;
 mod impls;

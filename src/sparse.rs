@@ -1,3 +1,5 @@
+use bit_vec::BitVec;
+
 use std::os::unix::io::AsRawFd;
 
 use std::collections::HashMap;
@@ -19,8 +21,9 @@ pub enum Blob {
 }
 
 impl Blob {
-    pub fn new(file: File) -> Blob {
-        Blob::ReadWrite(VersionedSparseFile::new(SparseFile::new(file)))
+    /// Create a new ReadWrite blob with the given number of chunks.
+    pub fn new(file: File, size: usize) -> Blob {
+        Blob::ReadWrite(VersionedSparseFile::new(SparseFile::new(file, size)))
     }
 
     /// Freeze this Blob into a ReadOnly Blob.
@@ -44,7 +47,8 @@ impl Blob {
 /// is lazily acquired when requested. Mutable objects are represented
 /// using a VersionedSparseFile, which tracks additional metadata.
 pub struct SparseFile {
-    file: File
+    file: File,
+    chunks: BitVec
 }
 
 /// A sparse file annotated with version information for each chunk.
@@ -60,22 +64,47 @@ pub struct VersionedSparseFile {
 }
 
 impl SparseFile {
-    pub fn new(file: File) -> SparseFile {
-        SparseFile { file: file }
+    /// Create a new SparseFile using the passed File for storage.
+    ///
+    /// The SparseFile is limited to storing `size` chunks of equal size.
+    ///
+    /// The created SparseFile assumes the File has no chunks in it,
+    /// to resume from a previous state use `SparseFile::load`.
+    ///
+    /// Equivalent to `SparseFile::load(file, BitVec::from_elem(size, false))`.
+    pub fn new(file: File, size: usize) -> SparseFile {
+        SparseFile::load(file, BitVec::from_elem(size, false))
     }
 
-    pub fn write(&mut self, chunk: Chunk, data: &[u8]) -> io::Result<()> {
+    /// Load a SparseFile from a backing File and a chunks BitVec.
+    pub fn load(file: File, chunks: BitVec) -> SparseFile {
+        SparseFile {
+            file: file,
+            chunks: chunks
+        }
+    }
+
+    pub fn write(&mut self, chunk: Chunk, data: &[u8]) -> ::Result<()> {
         assert_eq!(data.len(), BLOCK_SIZE);
-        self.file.pwrite(BLOCK_SIZE * chunk.0, data).map(|_| ())
+        self.chunks.set(chunk.0, true);
+        try!(self.file.pwrite(BLOCK_SIZE * chunk.0, data));
+        Ok(())
     }
 
-    pub fn read(&self, chunk: Chunk, buf: &mut [u8]) -> io::Result<()> {
+    pub fn read(&self, chunk: Chunk, buf: &mut [u8]) -> ::Result<()> {
         assert_eq!(buf.len(), BLOCK_SIZE);
-        self.file.pread(BLOCK_SIZE * chunk.0, buf).map(|_| ())
+        if self.chunks[chunk.0] {
+            try!(self.file.pread(BLOCK_SIZE * chunk.0, buf));
+            Ok(())
+        } else {
+            Err(::Error::NotFound)
+        }
     }
 
-    pub fn evict(&mut self, chunk: Chunk) -> io::Result<()> {
-        self.file.punch(chunk.0 * BLOCK_SIZE, BLOCK_SIZE)
+    pub fn evict(&mut self, chunk: Chunk) -> ::Result<()> {
+        self.chunks.set(chunk.0, false);
+        try!(self.file.punch(chunk.0 * BLOCK_SIZE, BLOCK_SIZE));
+        Ok(())
     }
 }
 
@@ -201,15 +230,21 @@ mod test {
 
     #[test]
     fn test_sparse_file_write_read_evict() {
-        let mut sparse_file = SparseFile::new(tempfile().unwrap());
+        const RUNS: usize = 4;
+        const CHUNKS_PER_RUN: usize = 4;
+        const INDEX_MULTIPLIER: usize = 20;
+        const MAX_CHUNKS: usize = CHUNKS_PER_RUN * INDEX_MULTIPLIER;
+
+        let mut sparse_file = SparseFile::new(tempfile().unwrap(),
+                                              MAX_CHUNKS);
 
         // Run the test for several sets of chunks.
-        for _ in 0..4 {
-            let buffers = vec![gen_random_chunk(); 4];
+        for _ in 0..RUNS {
+            let buffers = vec![gen_random_chunk(); CHUNKS_PER_RUN];
 
             // Write all the chunks.
             for (index, buffer) in buffers.iter().enumerate() {
-                let chunk = Chunk(index * 20);
+                let chunk = Chunk(index * INDEX_MULTIPLIER);
                 sparse_file.write(chunk, buffer).unwrap();
             }
 
@@ -218,14 +253,14 @@ mod test {
             //   - Evict it
             //   - Read it again and confirm it is evicted
             for (index, buffer) in buffers.iter().enumerate() {
-                let chunk = Chunk(index * 20);
+                let chunk = Chunk(index * INDEX_MULTIPLIER);
                 let write_buf: &mut [u8] = &mut [0; BLOCK_SIZE];
                 sparse_file.read(chunk, write_buf).unwrap();
                 assert_eq!(&*write_buf, &**buffer);
 
                 sparse_file.evict(chunk).unwrap();
-                sparse_file.read(chunk, write_buf).unwrap();
-                assert_eq!(&*write_buf, &[0u8; BLOCK_SIZE] as &[u8]);
+                sparse_file.read(chunk, write_buf).unwrap_err()
+                    .assert_not_found();
             }
         }
     }
