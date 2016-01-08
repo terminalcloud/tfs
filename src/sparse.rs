@@ -116,17 +116,42 @@ impl VersionedSparseFile {
         }
     }
 
+    /// Get the current version of the chunk.
+    ///
+    /// This is done with a single SeqCst atomic load - note that
+    /// this value may be out of date and a more recent version
+    /// written immediately.
     pub fn version(&self, chunk: &Chunk) -> Option<usize> {
         self.versions.get(chunk)
             .map(|v| v.load())
     }
 
+    /// Read the most up-to-date version of the chunk.
     pub fn read(&self, chunk: Chunk, buf: &mut [u8]) -> ::Result<()> {
-        Ok(())
+        self.file.read(chunk, buf)
     }
 
-    pub fn write(&mut self, chunk: Chunk, version: Version, data: &[u8]) -> ::Result<()> {
-        Ok(())
+    /// Write a new version of the chunk.
+    pub fn write(&mut self, chunk: Chunk, data: &[u8]) -> ::Result<()> {
+        self.versions.entry(chunk)
+            .or_insert(Version::new(0))
+            .increment();
+        self.file.write(chunk, data)
+    }
+
+    /// Do a write *without* incrementing the version, for refilling after eviction.
+    ///
+    /// In order to remain consistent, the data *must* match the current version
+    /// of the chunk.
+    pub fn fill(&mut self, chunk: Chunk, data: &[u8]) -> ::Result<()> {
+        self.file.write(chunk, data)
+    }
+
+    /// Evict the chunk from the file.
+    ///
+    /// This does not reset the version of the chunk.
+    pub fn evict(&mut self, chunk: Chunk) -> ::Result<()> {
+        self.file.evict(chunk)
     }
 }
 
@@ -262,6 +287,63 @@ mod test {
                     .assert_not_found();
             }
         }
+    }
+
+    #[test]
+    fn fuzz_versioned_sparse_file() {
+        // Properties:
+        //   - Reads always return latest version
+        //   - Writes bump the version
+        //   - Evict then write doesn't reset version
+
+        const MAGNITUDE: usize = 1;
+        const NUM_VERSIONS: usize = 10 * MAGNITUDE;
+        const NUM_OBJECTS: usize = 10 * MAGNITUDE;
+        const CHUNK_SIZE: usize = BLOCK_SIZE;
+        const MAX_CHUNKS: usize = NUM_OBJECTS;
+
+        use scoped_threadpool::Pool;
+        use util::test::gen_random_objects;
+
+        let objects = gen_random_objects(NUM_OBJECTS, CHUNK_SIZE, NUM_VERSIONS);
+        let sparse_file = &RwLock::new(VersionedSparseFile::new(
+            SparseFile::new(tempfile().unwrap(), MAX_CHUNKS)));
+
+        // Use a thread pool to run the tests.
+        let mut pool = Pool::new(objects.len() as u32);
+
+        pool.scoped(|scope| {
+            for (index, versions) in objects.values().enumerate() {
+                let chunk = Chunk(index);
+                scope.execute(move || {
+                    // Write all the versions of the chunk in order.
+                    // After each write, confirm the version, then confirm the contents.
+                    for (version, data) in versions.iter().enumerate() {
+                        // Write the data.
+                        sparse_file.write().unwrap().write(chunk, data).unwrap();
+
+                        // Check the version.
+                        assert_eq!(sparse_file.read().unwrap().version(&chunk).unwrap(),
+                                   version + 1); // versions start at 1 not 0
+
+                        // Read the data, confirm the contents.
+                        let buf: &mut [u8] = &mut [0; CHUNK_SIZE];
+                        sparse_file.read().unwrap().read(chunk, buf).unwrap();
+                        assert_eq!(&**data, buf);
+
+                        // Evict the chunk.
+                        sparse_file.write().unwrap().evict(chunk).unwrap();
+
+                        // Expect NotFound.
+                        sparse_file.read().unwrap().read(chunk, buf)
+                            .unwrap_err().assert_not_found();
+
+                        // Next write of data should work fine, versions should
+                        // not be reset on eviction then rewrite.
+                    }
+                });
+            }
+        });
     }
 }
 
