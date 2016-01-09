@@ -1,19 +1,37 @@
 use terminal_linked_hash_map::LinkedHashMap;
 use std::collections::HashMap;
+use std::sync::RwLock;
 
 use fs::Fs;
 use sparse::{SparseFile, VersionedSparseFile, Blob};
 use {Storage, Cache, ChunkDescriptor, FileDescriptor, Version};
 
 pub struct LruFs {
-    files: HashMap<FileDescriptor, Blob>,
-    chunks: LinkedHashMap<ChunkDescriptor, Metadata>
+    files: HashMap<FileDescriptor, RwLock<Blob>>,
+    chunks: RwLock<LinkedHashMap<ChunkDescriptor, Metadata>>
 }
 
 /// Per-chunk Metadata.
 struct Metadata;
 
 impl LruFs {
+    pub fn new() -> LruFs {
+        LruFs {
+            files: HashMap::new(),
+            chunks: RwLock::new(LinkedHashMap::new())
+        }
+    }
+
+    pub fn version(&self, chunk: &ChunkDescriptor) -> Option<usize> {
+        self.files.get(&chunk.file)
+            .and_then(|blob| {
+                match *blob.read().unwrap() {
+                    Blob::ReadOnly(_) => None,
+                    Blob::ReadWrite(ref v) => v.version(&chunk.chunk)
+                }
+            })
+    }
+
     pub fn init_flush_thread(&self, fs: Fs) -> ::Result<()> {
         // Create a channel between us and the flush thread to submit flushes on.
         //
@@ -47,7 +65,9 @@ impl LruFs {
 impl Storage for LruFs {
     fn create(&self, chunk: &ChunkDescriptor, version: Option<Version>,
               data: &[u8]) -> ::Result<()> {
-         Ok(())
+        // Create new chunks entry.
+        // Create new file if needed, then write chunk if needed.
+        Ok(())
     }
 
     fn promote(&self, chunk: &ChunkDescriptor) -> ::Result<()> {
@@ -61,9 +81,25 @@ impl Storage for LruFs {
 }
 
 impl Cache for LruFs {
-    fn read(&self, chunk: &ChunkDescriptor, version: Option<Version>,
+    fn read(&self, chunk: &ChunkDescriptor, _: Option<Version>,
             buf: &mut [u8]) -> ::Result<()> {
-        Ok(())
+        try!(self.chunks.write().unwrap().get_refresh(chunk)
+             .ok_or_else(|| ::Error::NotFound));
+        self.files.get(&chunk.file)
+            .ok_or_else(|| ::Error::NotFound)
+            .and_then(|blob| blob.read().unwrap().read(chunk.chunk, buf))
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use lru::LruFs;
+    use mock::StorageFuzzer;
+
+    #[test]
+    fn fuzz_lru_fs_storage() {
+        // TODO: uncomment
+        // StorageFuzzer::new(LruFs::new()).run(1)
     }
 }
 

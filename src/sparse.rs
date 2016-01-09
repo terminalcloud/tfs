@@ -4,7 +4,7 @@ use std::os::unix::io::AsRawFd;
 
 use std::collections::HashMap;
 use std::fs::File;
-use std::io;
+use std::{io, ops};
 
 use {Chunk, Version};
 
@@ -33,6 +33,17 @@ impl Blob {
         match self {
             this @ Blob::ReadOnly(_) => this,
             Blob::ReadWrite(versioned) => Blob::ReadOnly(versioned.into())
+        }
+    }
+}
+
+impl ops::Deref for Blob {
+    type Target = SparseFile;
+
+    fn deref(&self) -> &SparseFile {
+        match *self {
+            Blob::ReadOnly(ref ro) => ro,
+            Blob::ReadWrite(ref v) => &v.file
         }
     }
 }

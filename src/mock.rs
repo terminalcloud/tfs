@@ -114,6 +114,13 @@ pub struct StorageFuzzer<S> {
 }
 
 impl<S: Storage> StorageFuzzer<S> {
+    /// Construct a new StorageFuzzer wrapping a given Storage.
+    pub fn new(storage: S) -> StorageFuzzer<S> {
+        StorageFuzzer {
+            storage: storage
+        }
+    }
+
     /// Run all fuzz tests on the underlying Storage.
     ///
     /// The magnitude is used to determine the relative size of a
@@ -163,18 +170,15 @@ impl<S: Storage> StorageFuzzer<S> {
                         file: FileDescriptor(file.clone()),
                         chunk: chunk.clone()
                     };
+                    let mut buffer = vec![0; chunk_size];
 
                     // Write all the versions of the chunk in order.
+                    // After each one, read back the latest version and
+                    // make sure it is there.
                     for (version, data) in versions.iter().enumerate() {
                         self.storage.create(&chunk_descriptor,
                                             Some(Version::new(version)),
                                             data).unwrap();
-                    }
-
-                    // Make sure that all the versions of the chunk can
-                    // be recovered.
-                    let mut buffer = vec![0; chunk_size];
-                    for (version, data) in versions.iter().enumerate() {
                         self.storage.read(&chunk_descriptor,
                                           Some(Version::new(version)),
                                           &mut buffer).unwrap();
