@@ -1,18 +1,27 @@
+use terminal_linked_hash_map::LinkedHashMap;
+use std::collections::HashMap;
+
 use fs::Fs;
 use sparse::{SparseFile, VersionedSparseFile, Blob};
 use {Storage, Cache, ChunkDescriptor, FileDescriptor, Version};
 
 pub struct LruFs {
-    files: PinnedLruMap<FileDescriptor, Blob>,
+    files: HashMap<FileDescriptor, Blob>,
+    chunks: LinkedHashMap<ChunkDescriptor, Metadata>
 }
 
-struct PinnedLruMap<K, V> {
-    key: K,
-    value: V
-}
+/// Per-chunk Metadata.
+struct Metadata;
 
 impl LruFs {
     pub fn init_flush_thread(&self, fs: Fs) -> ::Result<()> {
+        // Create a channel between us and the flush thread to submit flushes on.
+        //
+        // Start flush thread operating over this channel:
+        //   - waits for flushes on the channel
+        //   - for each flush:
+        //     - check if the flush is still relevant
+        //     - if so flush it then unpin (if the version is the same)
         Ok(())
     }
 
@@ -53,8 +62,8 @@ impl Storage for LruFs {
 
 impl Cache for LruFs {
     fn read(&self, chunk: &ChunkDescriptor, version: Option<Version>,
-            buf: &mut [u8]) -> ::Result<usize> {
-        Ok(buf.len())
+            buf: &mut [u8]) -> ::Result<()> {
+        Ok(())
     }
 }
 

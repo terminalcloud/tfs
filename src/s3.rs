@@ -22,8 +22,8 @@ impl Storage for S3Storage {
 
 impl Cache for S3Storage {
     fn read(&self, chunk: &ChunkDescriptor, version: Option<Version>,
-            buf: &mut [u8]) -> ::Result<usize> {
-        Ok(buf.len())
+            buf: &mut [u8]) -> ::Result<()> {
+        Ok(())
     }
 }
 

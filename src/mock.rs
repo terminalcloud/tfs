@@ -29,7 +29,7 @@ impl MockStorage {
 
 impl Cache for MockStorage {
     fn read(&self, chunk: &ChunkDescriptor, version: Option<Version>,
-            mut buf: &mut [u8]) -> ::Result<usize> {
+            mut buf: &mut [u8]) -> ::Result<()> {
         self.inner.read().unwrap().read(chunk, version, buf)
     }
 }
@@ -52,7 +52,7 @@ impl Storage for MockStorage {
 
 impl InnerMockStorage {
     fn read(&self, chunk: &ChunkDescriptor, version: Option<Version>,
-            mut buf: &mut [u8]) -> ::Result<usize> {
+            mut buf: &mut [u8]) -> ::Result<()> {
         self.storage
             .get(chunk)
             .and_then(|chunk_map| chunk_map.get(&version.as_ref().map(|v| v.load())))
@@ -61,7 +61,8 @@ impl InnerMockStorage {
                 // TODO: Maybe be more flexible here, or just
                 // always ensure this is the case.
                 assert_eq!(object.len(), buf.len());
-                Ok(try!(buf.write(&object)))
+                try!(buf.write(&object));
+                Ok(())
             })
     }
 

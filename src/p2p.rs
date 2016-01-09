@@ -6,8 +6,8 @@ pub struct P2PCache {
 
 impl Cache for P2PCache {
     fn read(&self, chunk: &ChunkDescriptor, version: Option<Version>,
-            buf: &mut [u8]) -> ::Result<usize> {
-        Ok(buf.len())
+            buf: &mut [u8]) -> ::Result<()> {
+        Ok(())
     }
 }
 

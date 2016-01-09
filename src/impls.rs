@@ -18,7 +18,7 @@ impl Storage for Box<Storage> {
 
 impl Cache for Box<Storage> {
     fn read(&self, chunk: &ChunkDescriptor, version: Option<Version>,
-            buf: &mut [u8]) -> ::Result<usize> {
+            buf: &mut [u8]) -> ::Result<()> {
         (**self).read(chunk, version, buf)
     }
 }

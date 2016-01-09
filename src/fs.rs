@@ -24,7 +24,7 @@ impl Fs {
         self.inner.local.init_flush_thread(self.clone())
     }
 
-    pub fn read(&self, chunk: &ChunkDescriptor, buf: &mut [u8]) -> ::Result<usize> {
+    pub fn read(&self, chunk: &ChunkDescriptor, buf: &mut [u8]) -> ::Result<()> {
         // Try all of our caches in order, starting with local storage
         // and ending with cold storage.
         //
