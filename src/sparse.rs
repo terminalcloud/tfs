@@ -3,6 +3,7 @@ use bit_vec::BitVec;
 use std::collections::HashMap;
 use std::fs::File;
 use std::{io, ops};
+use std::os::unix::io::AsRawFd;
 
 use {Chunk, Version};
 
@@ -185,56 +186,49 @@ pub trait SparseFileExt {
     fn pwrite(&mut self, offset: usize, data: &[u8]) -> io::Result<usize>;
 }
 
-#[cfg(target_os = "linux")]
-mod _unix {
-    use std::io;
-    use std::fs::File;
-    use std::os::unix::io::AsRawFd;
-
-    use super::{SparseFileExt};
-
-    // Shim for converting C-style errors to io::Errors.
-    fn cvt(err: i64) -> io::Result<usize> {
-        if err < 0 {
-            Err(io::Error::last_os_error())
-        } else {
-            Ok(err as usize)
-        }
-    }
-
-    impl SparseFileExt for File {
-        fn punch(&mut self, offset: usize, size: usize) -> io::Result<()> {
-            use libc::{fallocate, FALLOC_FL_PUNCH_HOLE, FALLOC_FL_KEEP_SIZE};
-
-            unsafe {
-                cvt(fallocate(self.as_raw_fd(),
-                              FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE,
-                              offset as i64, size as i64) as i64) }.map(|_| ())
-        }
-
-        fn pread(&self, offset: usize, buf: &mut [u8]) -> io::Result<usize> {
-            use libc::pread;
-
-            unsafe { cvt(pread(self.as_raw_fd(),
-                               buf.as_mut_ptr() as *mut ::libc::c_void,
-                               buf.len(),
-                               offset as i64) as i64) }
-        }
-
-        fn pwrite(&mut self, offset: usize, data: &[u8]) -> io::Result<usize> {
-            use libc::pwrite;
-
-            unsafe { cvt(pwrite(self.as_raw_fd(),
-                                data.as_ptr() as *const ::libc::c_void,
-                                data.len(),
-                                offset as i64) as i64) }
-        }
+// Shim for converting C-style errors to io::Errors.
+fn cvt(err: i64) -> io::Result<usize> {
+    if err < 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(err as usize)
     }
 }
 
-#[cfg(target_os = "linux")]
-mod _other {
+impl SparseFileExt for File {
+    #[cfg(target_os = "linux")]
+    fn punch(&mut self, offset: usize, size: usize) -> io::Result<()> {
+        use libc::{fallocate, FALLOC_FL_PUNCH_HOLE, FALLOC_FL_KEEP_SIZE};
 
+        unsafe {
+            cvt(fallocate(self.as_raw_fd(),
+                          FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE,
+                          offset as i64, size as i64) as i64) }.map(|_| ())
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    /// WARNING: Implemented using zeroing on the system this documentation was generated for.
+    fn punch(&mut self, offset: usize, size: usize) -> io::Result<()> {
+        self.pwrite(offset, &vec![0; size]).map(|_| ())
+    }
+
+    fn pread(&self, offset: usize, buf: &mut [u8]) -> io::Result<usize> {
+        use libc::pread;
+
+        unsafe { cvt(pread(self.as_raw_fd(),
+                           buf.as_mut_ptr() as *mut ::libc::c_void,
+                           buf.len(),
+                           offset as i64) as i64) }
+    }
+
+    fn pwrite(&mut self, offset: usize, data: &[u8]) -> io::Result<usize> {
+        use libc::pwrite;
+
+        unsafe { cvt(pwrite(self.as_raw_fd(),
+                            data.as_ptr() as *const ::libc::c_void,
+                            data.len(),
+                            offset as i64) as i64) }
+    }
 }
 
 #[cfg(test)]
