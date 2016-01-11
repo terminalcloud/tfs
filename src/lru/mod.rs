@@ -60,6 +60,13 @@ impl LruFs {
         // Queue new versioned chunk to be flushed. When done, unpin.
         Ok(())
     }
+
+    pub fn evict(&self, space_required: usize) -> ::Result<()> {
+        // Determine if we need to evict for the space requested:
+        //   if so pop a chunk descriptor off the chunks order map
+        //   evict that chunk
+        Ok(())
+    }
 }
 
 impl Storage for LruFs {

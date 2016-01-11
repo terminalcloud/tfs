@@ -16,8 +16,16 @@ struct FsInner {
 }
 
 impl Fs {
-    pub fn new() -> Self {
-        unimplemented!()
+    pub fn new(storage: Box<Storage>,
+               caches: Vec<Box<Cache>>,
+               local: LruFs) -> Self {
+        Fs {
+            inner: Arc::new(FsInner {
+                storage: storage,
+                caches: caches,
+                local: local
+            })
+        }
     }
 
     pub fn init(&self) -> ::Result<()> {
