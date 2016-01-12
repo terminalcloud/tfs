@@ -11,6 +11,7 @@ uuid = "0.1"
 libc = "0.2"
 bit-vec = "0.4"
 terminal-linked-hash-map = "0.1"
+rwlock2 = "0.1"
 
 [dev-dependencies]
 tempfile = "2.0"

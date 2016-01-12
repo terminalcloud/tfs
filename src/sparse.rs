@@ -34,6 +34,29 @@ impl Blob {
             Blob::ReadWrite(versioned) => Blob::ReadOnly(versioned.into())
         }
     }
+
+    /// Fill the cache for this chunk if not already full.
+    ///
+    /// If the version is outdated no data will be written.
+    pub fn fill(&mut self, chunk: Chunk, version: Option<Version>,
+                data: &[u8]) -> ::Result<()> {
+        match *self {
+            Blob::ReadOnly(ref mut ro) => {
+                ro.write(chunk, data)
+            },
+            Blob::ReadWrite(ref mut v) => {
+                if v.version(&chunk) == version.map(|v| v.load()) {
+                    v.fill(chunk, data)
+                } else {
+                    // The version is wrong, so just ignore it.
+                    //
+                    // Either it is old data or it needs to be submitted
+                    // as a versioned write.
+                    Ok(())
+                }
+            }
+        }
+    }
 }
 
 impl ops::Deref for Blob {

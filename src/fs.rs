@@ -56,8 +56,13 @@ impl Fs {
                 .fold(Err(::Error::NotFound), |res, cache| {
                     res.or_else(|_| cache.read(chunk, version.clone(), buf))
                 }).and_then(|_| {
-                    try!(self.inner.local.try_write_immutable_chunk(&chunk, buf));
-                    Ok(())
+                    // Write back the data we got to our cache.
+                    //
+                    // The LruFs takes care to ensure we can't overwrite
+                    // with old data.
+                    self.inner.local.try_write_immutable_chunk(&chunk,
+                                                               version.clone(),
+                                                               buf)
                 });
 
             if version.as_ref().map(|v| v.load()) == self.inner.local.version(chunk) {

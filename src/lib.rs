@@ -7,6 +7,7 @@ extern crate uuid;
 extern crate libc;
 extern crate bit_vec;
 extern crate terminal_linked_hash_map;
+extern crate rwlock2;
 
 #[cfg(test)]
 extern crate tempfile;

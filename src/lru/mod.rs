@@ -1,29 +1,38 @@
 use terminal_linked_hash_map::LinkedHashMap;
+use rwlock2::{RwLock, RwLockReadGuard};
+
+use std::fs::OpenOptions;
 use std::collections::HashMap;
-use std::sync::RwLock;
+use std::collections::hash_map::Entry;
+use std::sync::Mutex;
+use std::path::PathBuf;
 
 use fs::Fs;
-use sparse::{SparseFile, VersionedSparseFile, Blob};
+use sparse::Blob;
 use {Storage, Cache, ChunkDescriptor, FileDescriptor, Version};
 
 pub struct LruFs {
-    files: HashMap<FileDescriptor, RwLock<Blob>>,
-    chunks: RwLock<LinkedHashMap<ChunkDescriptor, Metadata>>
+    files: RwLock<HashMap<FileDescriptor, RwLock<Blob>>>,
+    chunks: Mutex<LinkedHashMap<ChunkDescriptor, Metadata>>,
+    mount: PathBuf
 }
+
+pub type BlobGuard<'a> = RwLockReadGuard<'a, RwLock<Blob>>;
 
 /// Per-chunk Metadata.
 struct Metadata;
 
 impl LruFs {
-    pub fn new() -> LruFs {
+    pub fn new(mount: PathBuf) -> LruFs {
         LruFs {
-            files: HashMap::new(),
-            chunks: RwLock::new(LinkedHashMap::new())
+            files: RwLock::new(HashMap::new()),
+            chunks: Mutex::new(LinkedHashMap::new()),
+            mount: mount
         }
     }
 
     pub fn version(&self, chunk: &ChunkDescriptor) -> Option<usize> {
-        self.files.get(&chunk.file)
+        self.files.read().unwrap().get(&chunk.file)
             .and_then(|blob| {
                 match *blob.read().unwrap() {
                     Blob::ReadOnly(_) => None,
@@ -44,10 +53,15 @@ impl LruFs {
     }
 
     pub fn try_write_immutable_chunk(&self, chunk: &ChunkDescriptor,
+                                     version: Option<Version>,
                                      data: &[u8]) -> ::Result<()> {
         // Write locally if not already there, evict if out of space.
         // No versioning or pinning needed.
-        Ok(())
+        try!(self.reserve(chunk));
+
+        let blob = try!(self.get_or_create_blob(&chunk.file));
+        let mut blob_guard = blob.write().unwrap();
+        blob_guard.fill(chunk.chunk, version, data)
     }
 
     pub fn try_write_mutable_chunk(&self, chunk: &ChunkDescriptor,
@@ -58,31 +72,67 @@ impl LruFs {
         //   - pin the new chunk so it cannot be deleted
 
         // Queue new versioned chunk to be flushed. When done, unpin.
+        try!(self.reserve(chunk));
+        try!(self.refresh_chunk(chunk));
         Ok(())
     }
 
-    pub fn evict(&self, space_required: usize) -> ::Result<()> {
-        // Determine if we need to evict for the space requested:
-        //   if so pop a chunk descriptor off the chunks order map
-        //   evict that chunk
-        Ok(())
-    }
-}
-
-impl Storage for LruFs {
-    fn create(&self, chunk: &ChunkDescriptor, version: Option<Version>,
-              data: &[u8]) -> ::Result<()> {
-        // Create new chunks entry.
-        // Create new file if needed, then write chunk if needed.
+    fn refresh_chunk(&self, chunk: &ChunkDescriptor) -> ::Result<()> {
+        try!(self.chunks.lock().unwrap().get_refresh(chunk)
+            .ok_or_else(|| ::Error::NotFound));
         Ok(())
     }
 
-    fn promote(&self, chunk: &ChunkDescriptor) -> ::Result<()> {
-        Ok(())
+    /// Efficiently create a Blob if it doesn't exist.
+    ///
+    /// If the Blob already exists, only a read guard will be acquired.
+    fn get_or_create_blob(&self, fd: &FileDescriptor) -> ::Result<BlobGuard> {
+        // This code is very ugly to have the most optimal acquisition of locks.
+        //
+        // It is conceptually just:
+        //    self.files.entry(fd).or_insert_with(|| new_blob())
+
+        // The file is not present at the start of the operation.
+        if self.files.read().unwrap().get(fd).is_none() {
+            // At this stage we only *may* need to insert the file,
+            // as it may have been inserted by another thread as soon
+            // as we released the read guard, so we need to check again
+            // after acquiring the write lock.
+            match self.files.write().unwrap().entry(fd.clone()) {
+                // Insert the file.
+                Entry::Vacant(v) => {
+                    let blob = try!(self.create_blob(&fd));
+                    v.insert(RwLock::new(blob));
+                },
+                // Another thread beat us to the punch.
+                _ => {}
+            }
+        }
+
+        // Now the file is certainly present.
+        Ok(self.files.read().unwrap().map(|map| map.get(fd).unwrap()))
     }
 
-    fn delete(&self, chunk: &ChunkDescriptor,
-              version: Option<Version>) -> ::Result<()> {
+    fn create_blob(&self, fd: &FileDescriptor) -> ::Result<Blob> {
+        let path = self.mount.join(fd.0.to_string());
+        let file = try!(OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(path));
+
+        // TODO: Resume from existing chunks file.
+        // TODO: Use a variable size.
+        Ok(Blob::new(file, 1024))
+    }
+
+    /// Reserves space for the specified ChunkDescriptor.
+    ///
+    /// The space is reserved until the chunk is written, at which point
+    /// it is available for eviction again by subsequent calls to reserve.
+    ///
+    /// Should *always* be called before writing a chunk.
+    fn reserve(&self, reserve: &ChunkDescriptor) -> ::Result<()> {
         Ok(())
     }
 }
@@ -90,9 +140,8 @@ impl Storage for LruFs {
 impl Cache for LruFs {
     fn read(&self, chunk: &ChunkDescriptor, _: Option<Version>,
             buf: &mut [u8]) -> ::Result<()> {
-        try!(self.chunks.write().unwrap().get_refresh(chunk)
-             .ok_or_else(|| ::Error::NotFound));
-        self.files.get(&chunk.file)
+        try!(self.refresh_chunk(chunk));
+        self.files.read().unwrap().get(&chunk.file)
             .ok_or_else(|| ::Error::NotFound)
             .and_then(|blob| blob.read().unwrap().read(chunk.chunk, buf))
     }
@@ -100,13 +149,9 @@ impl Cache for LruFs {
 
 #[cfg(test)]
 mod test {
-    use lru::LruFs;
-    use mock::StorageFuzzer;
-
     #[test]
     fn fuzz_lru_fs_storage() {
-        // TODO: uncomment
-        // StorageFuzzer::new(LruFs::new()).run(1)
+        // TODO: Fill in
     }
 }
 
