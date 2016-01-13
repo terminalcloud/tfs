@@ -8,6 +8,9 @@ extern crate libc;
 extern crate bit_vec;
 extern crate terminal_linked_hash_map;
 extern crate rwlock2;
+extern crate crossbeam;
+extern crate threadpool;
+extern crate atomic_option;
 
 #[cfg(test)]
 extern crate tempfile;
@@ -59,7 +62,7 @@ impl Clone for Version {
     }
 }
 
-pub trait Cache: Sync {
+pub trait Cache: Send + Sync {
     fn read(&self, chunk: &ChunkDescriptor, version: Option<Version>,
             buf: &mut [u8]) -> ::Result<()>;
 }

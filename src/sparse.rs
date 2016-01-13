@@ -7,7 +7,7 @@ use std::os::unix::io::AsRawFd;
 
 use {Chunk, Version};
 
-const BLOCK_SIZE: usize = 2048;
+pub const BLOCK_SIZE: usize = 2048;
 
 /// The representation of a single tfs object.
 ///
@@ -55,6 +55,29 @@ impl Blob {
                     Ok(())
                 }
             }
+        }
+    }
+
+    /// Get this Blob as a raw mutable SparseFile.
+    ///
+    /// Care should be taken to not do operations on this SparseFile
+    /// which would invalidate the state of a VersionedSparseFile.
+    pub fn as_mut_sparse_file(&mut self) -> &mut SparseFile {
+        match *self {
+            Blob::ReadOnly(ref mut ro) => ro,
+            Blob::ReadWrite(ref mut v) => &mut v.file
+        }
+    }
+
+    /// Get the VersionedSparseFile in this Blob::ReadWrite
+    ///
+    /// ## Panics
+    ///
+    /// Panics if the Blob is ReadOnly.
+    pub fn assert_versioned_mut(&mut self) -> &mut VersionedSparseFile {
+        match *self {
+            Blob::ReadWrite(ref mut v) => v,
+            _ => panic!("Asserted ReadOnly blob as ReadWrite!")
         }
     }
 }
@@ -165,11 +188,14 @@ impl VersionedSparseFile {
     }
 
     /// Write a new version of the chunk.
-    pub fn write(&mut self, chunk: Chunk, data: &[u8]) -> ::Result<()> {
-        self.versions.entry(chunk)
+    ///
+    /// Returns the version written.
+    pub fn write(&mut self, chunk: Chunk, data: &[u8]) -> ::Result<usize> {
+        let version = self.versions.entry(chunk)
             .or_insert(Version::new(0))
             .increment();
-        self.file.write(chunk, data)
+        try!(self.file.write(chunk, data));
+        Ok(version)
     }
 
     /// Do a write *without* incrementing the version, for refilling after eviction.

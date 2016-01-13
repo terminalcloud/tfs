@@ -1,20 +1,29 @@
 use terminal_linked_hash_map::LinkedHashMap;
 use rwlock2::{RwLock, RwLockReadGuard};
+use crossbeam::sync::MsQueue;
+use atomic_option::AtomicOption;
 
 use std::fs::OpenOptions;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::sync::Mutex;
+use std::sync::atomic::Ordering;
 use std::path::PathBuf;
+
+use lru::flush::{FlushMessage, FlushPool};
 
 use fs::Fs;
 use sparse::Blob;
 use {Storage, Cache, ChunkDescriptor, FileDescriptor, Version};
 
+mod flush;
+
 pub struct LruFs {
     files: RwLock<HashMap<FileDescriptor, RwLock<Blob>>>,
     chunks: Mutex<LinkedHashMap<ChunkDescriptor, Metadata>>,
-    mount: PathBuf
+    mount: PathBuf,
+    flush: MsQueue<FlushMessage>,
+    pool: AtomicOption<FlushPool>
 }
 
 pub type BlobGuard<'a> = RwLockReadGuard<'a, RwLock<Blob>>;
@@ -27,7 +36,9 @@ impl LruFs {
         LruFs {
             files: RwLock::new(HashMap::new()),
             chunks: Mutex::new(LinkedHashMap::new()),
-            mount: mount
+            mount: mount,
+            flush: MsQueue::new(),
+            pool: AtomicOption::empty()
         }
     }
 
@@ -42,13 +53,10 @@ impl LruFs {
     }
 
     pub fn init_flush_thread(&self, fs: Fs) -> ::Result<()> {
-        // Create a channel between us and the flush thread to submit flushes on.
-        //
-        // Start flush thread operating over this channel:
-        //   - waits for flushes on the channel
-        //   - for each flush:
-        //     - check if the flush is still relevant
-        //     - if so flush it then unpin (if the version is the same)
+        // TODO: Make size of pool configurable.
+        let flush_pool = FlushPool::new(16, fs);
+        flush_pool.run();
+        self.pool.swap(Box::new(flush_pool), Ordering::SeqCst);
         Ok(())
     }
 
@@ -57,6 +65,10 @@ impl LruFs {
                                      data: &[u8]) -> ::Result<()> {
         // Write locally if not already there, evict if out of space.
         // No versioning or pinning needed.
+
+        // NOTE:
+        // We don't refresh here since the chunk was probably
+        // refreshed as part of a read recently.
         try!(self.reserve(chunk));
 
         let blob = try!(self.get_or_create_blob(&chunk.file));
@@ -74,6 +86,16 @@ impl LruFs {
         // Queue new versioned chunk to be flushed. When done, unpin.
         try!(self.reserve(chunk));
         try!(self.refresh_chunk(chunk));
+
+        let blob = try!(self.get_or_create_blob(&chunk.file));
+        let mut blob_guard = blob.write().unwrap();
+        let version = try!(blob_guard.assert_versioned_mut()
+            .write(chunk.chunk, data));
+
+        // Queue the new versioned chunk to be flushed.
+        self.flush.push(FlushMessage::Flush(chunk.clone(),
+                                            Some(Version::new(version))));
+
         Ok(())
     }
 
@@ -141,8 +163,7 @@ impl Cache for LruFs {
     fn read(&self, chunk: &ChunkDescriptor, _: Option<Version>,
             buf: &mut [u8]) -> ::Result<()> {
         try!(self.refresh_chunk(chunk));
-        self.files.read().unwrap().get(&chunk.file)
-            .ok_or_else(|| ::Error::NotFound)
+        self.get_or_create_blob(&chunk.file)
             .and_then(|blob| blob.read().unwrap().read(chunk.chunk, buf))
     }
 }

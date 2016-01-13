@@ -33,6 +33,18 @@ impl Fs {
     }
 
     pub fn read(&self, chunk: &ChunkDescriptor, buf: &mut [u8]) -> ::Result<()> {
+        // TODO: Remove NotFound as an error - we find out if its not found by reading metadata.
+        // Before trying to do a read, fetch metadata to look for NotFound.
+        //
+        // LruFs should change to assume a read of a not-found chunk means it should be reserved:
+        //   - then, in try_write_immutable_chunk we transition from reserved -> stable
+        //   - any read which sees a reserved state blocks (on a CondVar) until the data
+        //     is downloaded
+        //
+        // This approach removes a potentially undesirable behavior where concurrent reads of a
+        // block which is not in the local cache will race to read from the other Caches and
+        // Storage, which can cause large amounts of unnecessary network traffic.
+
         // Loop until the version at the beginning and end of a read are the same.
         //
         // This "resolves" conflicts between concurrent reads and writes in a best-effort
@@ -84,5 +96,8 @@ impl Fs {
         //   - promote
         Ok(())
     }
+
+    pub fn local(&self) -> &LruFs { &self.inner.local }
+    pub fn storage(&self) -> &Storage { &*self.inner.storage }
 }
 
