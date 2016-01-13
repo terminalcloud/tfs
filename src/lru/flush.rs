@@ -64,7 +64,7 @@ impl FlushPool {
     // Includes code for restarting the task under panics.
     fn task(self) {
         // Sentinel will restart the task if the thread panics.
-        let mut sentinel = Sentinel(Some(self.clone()));
+        let mut sentinel = Sentinel(Some(self.clone()), None);
 
         let local = self.fs.local();
         let storage = self.fs.storage();
@@ -79,6 +79,9 @@ impl FlushPool {
                 },
 
                 FlushMessage::Flush(chunk, version) => {
+                    // Schedule this task to be restarted under panics.
+                    sentinel.1 = Some(FlushMessage::Flush(chunk.clone(), version.clone()));
+
                     let passed_version = version.as_ref().map(|v| v.load());
                     let current_version = local.version(&chunk);
 
@@ -105,7 +108,7 @@ impl FlushPool {
     }
 }
 
-struct Sentinel(Option<FlushPool>);
+struct Sentinel(Option<FlushPool>, Option<FlushMessage>);
 
 impl Sentinel {
     fn cancel(&mut self) { self.0.take(); }
@@ -114,6 +117,9 @@ impl Sentinel {
 impl Drop for Sentinel {
     fn drop(&mut self) {
         self.0.take().map(|pool| {
+            // Reschedule an interrupted flush.
+            self.1.take().map(|message| pool.fs.local().flush.push(message));
+
             let worker = pool.clone();
             pool.pool.execute(move || worker.task());
         });
