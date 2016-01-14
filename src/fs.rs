@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::{io, iter};
 
-use lru::LruFs;
+use local::LocalFs;
 use {Storage, Cache, ChunkDescriptor, FileDescriptor, Version};
 
 #[derive(Clone)]
@@ -12,13 +12,13 @@ pub struct Fs {
 struct FsInner {
     storage: Box<Storage>,
     caches: Vec<Box<Cache>>,
-    local: LruFs
+    local: LocalFs
 }
 
 impl Fs {
     pub fn new(storage: Box<Storage>,
                caches: Vec<Box<Cache>>,
-               local: LruFs) -> Self {
+               local: LocalFs) -> Self {
         Fs {
             inner: Arc::new(FsInner {
                 storage: storage,
@@ -36,7 +36,7 @@ impl Fs {
         // TODO: Remove NotFound as an error - we find out if its not found by reading metadata.
         // Before trying to do a read, fetch metadata to look for NotFound.
         //
-        // LruFs should change to assume a read of a not-found chunk means it should be reserved:
+        // LocalFs should change to assume a read of a not-found chunk means it should be reserved:
         //   - then, in try_write_immutable_chunk we transition from reserved -> stable
         //   - any read which sees a reserved state blocks (on a CondVar) until the data
         //     is downloaded
@@ -70,7 +70,7 @@ impl Fs {
                 }).and_then(|_| {
                     // Write back the data we got to our cache.
                     //
-                    // The LruFs takes care to ensure we can't overwrite
+                    // The LocalFs takes care to ensure we can't overwrite
                     // with old data.
                     self.inner.local.try_write_immutable_chunk(&chunk,
                                                                version.clone(),
@@ -97,7 +97,7 @@ impl Fs {
         Ok(())
     }
 
-    pub fn local(&self) -> &LruFs { &self.inner.local }
+    pub fn local(&self) -> &LocalFs { &self.inner.local }
     pub fn storage(&self) -> &Storage { &*self.inner.storage }
 }
 

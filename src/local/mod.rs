@@ -10,7 +10,7 @@ use std::sync::Mutex;
 use std::sync::atomic::Ordering;
 use std::path::PathBuf;
 
-use lru::flush::{FlushMessage, FlushPool};
+use local::flush::{FlushMessage, FlushPool};
 
 use fs::Fs;
 use sparse::Blob;
@@ -18,7 +18,7 @@ use {Storage, Cache, ChunkDescriptor, FileDescriptor, Version};
 
 mod flush;
 
-pub struct LruFs {
+pub struct LocalFs {
     files: RwLock<HashMap<FileDescriptor, RwLock<Blob>>>,
     mount: PathBuf,
     flush: MsQueue<FlushMessage>,
@@ -27,9 +27,9 @@ pub struct LruFs {
 
 pub type BlobGuard<'a> = RwLockReadGuard<'a, RwLock<Blob>>;
 
-impl LruFs {
-    pub fn new(mount: PathBuf) -> LruFs {
-        LruFs {
+impl LocalFs {
+    pub fn new(mount: PathBuf) -> LocalFs {
+        LocalFs {
             files: RwLock::new(HashMap::new()),
             mount: mount,
             flush: MsQueue::new(),
@@ -127,7 +127,7 @@ impl LruFs {
     }
 }
 
-impl Cache for LruFs {
+impl Cache for LocalFs {
     fn read(&self, chunk: &ChunkDescriptor, _: Option<Version>,
             buf: &mut [u8]) -> ::Result<()> {
         self.get_or_create_blob(&chunk.file)
@@ -138,7 +138,7 @@ impl Cache for LruFs {
 #[cfg(test)]
 mod test {
     #[test]
-    fn fuzz_lru_fs_storage() {
+    fn fuzz_local_fs() {
         // TODO: Fill in
     }
 }

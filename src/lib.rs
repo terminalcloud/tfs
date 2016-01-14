@@ -29,7 +29,7 @@ pub mod sparse;
 pub mod mock;
 pub mod error;
 
-mod lru;
+mod local;
 mod impls;
 mod util;
 
