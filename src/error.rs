@@ -5,6 +5,9 @@ pub type Result<T> = ::std::result::Result<T, Error>;
 #[derive(Debug)]
 pub enum Error {
     NotFound,
+    /// Indicates an operation failed because it must be filled
+    /// by a later Cache or Storage before it can succeed.
+    Reserved,
     Io(io::Error)
 }
 
@@ -25,6 +28,14 @@ impl Error {
             e => panic!("Not io error: {:?}!", e)
         }
     }
+
+    /// Testing helper for asserting this error is Error::Reserved
+    pub fn assert_reserved(self) {
+        match self {
+            Error::Reserved => {},
+            e => panic!("Not reserved error: {:?}!", e)
+        }
+    }
 }
 
 impl From<io::Error> for Error {
@@ -43,6 +54,7 @@ impl ::std::error::Error for Error {
     fn description(&self) -> &str {
         match *self {
             Error::NotFound => "Not Found",
+            Error::Reserved => "Reserved",
             Error::Io(ref io) => io.description()
         }
     }
@@ -50,6 +62,7 @@ impl ::std::error::Error for Error {
     fn cause(&self) -> Option<&::std::error::Error> {
         match *self {
             Error::NotFound => None,
+            Error::Reserved => None,
             Error::Io(ref io) => Some(io)
         }
     }

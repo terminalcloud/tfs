@@ -59,7 +59,7 @@ impl Fs {
             // and ending with cold storage.
             //
             // Then, if the read succeeded, write it back to local storage
-            // for later access, evicting as necessary.
+            // for later access.
             let version = &self.inner.local.version(chunk).map(Version::new);
 
             let res = iter::once(&self.inner.local as &Cache)
