@@ -20,7 +20,7 @@ mod flush;
 
 pub struct LruFs {
     files: RwLock<HashMap<FileDescriptor, RwLock<Blob>>>,
-    chunks: Mutex<LinkedHashMap<ChunkDescriptor, Metadata>>,
+    chunks: Mutex<ChunkMap>,
     mount: PathBuf,
     flush: MsQueue<FlushMessage>,
     pool: AtomicOption<FlushPool>
@@ -35,7 +35,8 @@ impl LruFs {
     pub fn new(mount: PathBuf) -> LruFs {
         LruFs {
             files: RwLock::new(HashMap::new()),
-            chunks: Mutex::new(LinkedHashMap::new()),
+            // TODO: Make size configurable
+            chunks: Mutex::new(ChunkMap::new(MAX_LRU_ENTRIES)),
             mount: mount,
             flush: MsQueue::new(),
             pool: AtomicOption::empty()
@@ -65,11 +66,7 @@ impl LruFs {
                                      data: &[u8]) -> ::Result<()> {
         // Write locally if not already there, evict if out of space.
         // No versioning or pinning needed.
-
-        // NOTE:
-        // We don't refresh here since the chunk was probably
-        // refreshed as part of a read recently.
-        try!(self.reserve(chunk));
+        self.chunks.lock().unwrap().immutable_write_reserve(chunk);
 
         let blob = try!(self.get_or_create_blob(&chunk.file));
         let mut blob_guard = blob.write().unwrap();
@@ -84,8 +81,7 @@ impl LruFs {
         //   - pin the new chunk so it cannot be deleted
 
         // Queue new versioned chunk to be flushed. When done, unpin.
-        try!(self.reserve(chunk));
-        try!(self.refresh_chunk(chunk));
+        self.chunks.lock().unwrap().mutable_write_reserve(chunk);
 
         let blob = try!(self.get_or_create_blob(&chunk.file));
         let mut blob_guard = blob.write().unwrap();
@@ -96,12 +92,6 @@ impl LruFs {
         self.flush.push(FlushMessage::Flush(chunk.clone(),
                                             Some(Version::new(version))));
 
-        Ok(())
-    }
-
-    fn refresh_chunk(&self, chunk: &ChunkDescriptor) -> ::Result<()> {
-        try!(self.chunks.lock().unwrap().get_refresh(chunk)
-            .ok_or_else(|| ::Error::NotFound));
         Ok(())
     }
 
@@ -162,14 +152,83 @@ impl LruFs {
 impl Cache for LruFs {
     fn read(&self, chunk: &ChunkDescriptor, _: Option<Version>,
             buf: &mut [u8]) -> ::Result<()> {
-        try!(self.refresh_chunk(chunk));
+        self.chunks.lock().unwrap().read_refresh(chunk);
         self.get_or_create_blob(&chunk.file)
             .and_then(|blob| blob.read().unwrap().read(chunk.chunk, buf))
     }
 }
 
+#[derive(Default)]
+struct ChunkMap {
+    lru: LinkedHashMap<ChunkDescriptor, Metadata>,
+    reserved: HashMap<ChunkDescriptor, Metadata>,
+    size: usize
+}
+
+// TODO: Make configurable.
+const MAX_LRU_ENTRIES: usize = 1024;
+
+impl ChunkMap {
+    fn new(size: usize) -> ChunkMap {
+        ChunkMap {
+            lru: LinkedHashMap::with_capacity(size),
+            reserved: HashMap::new(),
+            size: size
+        }
+    }
+
+    fn read_refresh(&mut self, chunk: &ChunkDescriptor) {
+        let present = {
+            let (lru, reserved) = (&mut self.lru, &mut self.reserved);
+            lru.get_refresh(chunk).or_else(|| reserved.get_mut(chunk)).is_some()
+        };
+
+        // If the chunk is not present, reserve the chunk.
+        if !present {
+            self.reserved.insert(chunk.clone(), Metadata);
+        }
+    }
+
+    fn immutable_write_reserve(&mut self, chunk: &ChunkDescriptor) {
+        // If the chunk is reserved by a previous read-miss, fill it.
+        if let Some(metadata) = self.reserved.remove(chunk) {
+            self.insert_and_evict(chunk);
+        // If the chunk is not reserved, just refresh it.
+        // The write is likely redundant.
+        } else {
+            // TODO: Investigate when this branch can be taken and if
+            // this is the correct thing to do in that case.
+            self.lru.get_refresh(chunk);
+        }
+    }
+
+    fn mutable_write_reserve(&mut self, chunk: &ChunkDescriptor) {
+        match self.reserved.entry(chunk.clone()) {
+            Entry::Vacant(v) => {
+                if let Some(metadata) = self.lru.remove(chunk) {
+                    v.insert(metadata);
+                } else {
+                    v.insert(Metadata);
+                }
+            },
+            // Already reserved
+            _ => {}
+        }
+    }
+
+    fn insert_and_evict(&mut self, chunk: &ChunkDescriptor) {
+        if self.lru.len() == self.size {
+            self.lru.pop_back();
+        }
+
+        self.lru.insert(chunk.clone(), Metadata);
+    }
+}
+
 #[cfg(test)]
 mod test {
+    use lru::ChunkMap;
+
     #[test]
     fn fuzz_lru_fs_storage() {
         // TODO: Fill in
