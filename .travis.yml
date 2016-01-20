@@ -7,4 +7,5 @@ addons:
 rust:
     - nightly
     - beta
-    - stable
+    # FIXME: See #2
+    # - stable
