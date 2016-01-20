@@ -151,11 +151,3 @@ impl Cache for LocalFs {
     }
 }
 
-#[cfg(test)]
-mod test {
-    #[test]
-    fn fuzz_local_fs() {
-        // TODO: Fill in
-    }
-}
-

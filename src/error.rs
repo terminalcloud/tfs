@@ -12,7 +12,6 @@ pub enum Error {
     Io(io::Error)
 }
 
-#[cfg(test)]
 impl Error {
     /// Testing helper for asserting this error is Error::Io
     pub fn assert_io(self) -> io::Error {
@@ -27,6 +26,14 @@ impl Error {
         match self {
             Error::Reserved => {},
             e => panic!("Not reserved error: {:?}!", e)
+        }
+    }
+
+    /// Testing helper for asserting this error is Error::NotFound
+    pub fn assert_not_found(self) {
+        match self {
+            Error::NotFound => {},
+            e => panic!("Not not-found error: {:?}!", e)
         }
     }
 }

@@ -8,15 +8,30 @@ use std::io::Write;
 use std::mem;
 
 use util::test::gen_random_objects;
-use {Storage, Cache, ChunkDescriptor, Version, FileDescriptor};
+use {Storage, Cache, ChunkDescriptor, Version, FileDescriptor, FileMetadata, Chunk};
 
 pub struct MockStorage {
     inner: RwLock<InnerMockStorage>
 }
 
-#[derive(Default)]
+#[derive(Default, Clone, Debug)]
 struct InnerMockStorage {
-    storage: HashMap<ChunkDescriptor, HashMap<Option<usize>, Vec<u8>>>
+    storage: HashMap<FileDescriptor, MockFile>
+}
+
+#[derive(Debug, Default, Clone)]
+struct MockFile {
+    data: HashMap<Chunk, HashMap<Option<usize>, Vec<u8>>>,
+    size: usize
+}
+
+impl From<FileMetadata> for MockFile {
+    fn from(metadata: FileMetadata) -> MockFile {
+        MockFile {
+            data: HashMap::with_capacity(metadata.size),
+            size: metadata.size
+        }
+    }
 }
 
 impl MockStorage {
@@ -35,6 +50,14 @@ impl Cache for MockStorage {
 }
 
 impl Storage for MockStorage {
+    fn set_metadata(&self, file: &FileDescriptor, metadata: FileMetadata) -> ::Result<()> {
+        self.inner.write().unwrap().set_metadata(file, metadata)
+    }
+
+    fn get_metadata(&self, file: &FileDescriptor) -> ::Result<FileMetadata> {
+        self.inner.read().unwrap().get_metadata(file)
+    }
+
     fn create(&self, chunk: &ChunkDescriptor, version: Option<Version>,
               data: &[u8]) -> ::Result<()> {
         self.inner.write().unwrap().create(chunk, version, data)
@@ -51,10 +74,23 @@ impl Storage for MockStorage {
 }
 
 impl InnerMockStorage {
+    fn set_metadata(&mut self, file: &FileDescriptor, metadata: FileMetadata) -> ::Result<()> {
+        self.storage.get_mut(&file)
+            .map(|mf| *mf = MockFile::from(metadata));
+        Ok(())
+    }
+
+    fn get_metadata(&self, file: &FileDescriptor) -> ::Result<FileMetadata> {
+        self.storage.get(&file)
+            .ok_or_else(|| ::Error::NotFound)
+            .map(|file| FileMetadata { size: file.size })
+    }
+
     fn read(&self, chunk: &ChunkDescriptor, version: Option<Version>,
             mut buf: &mut [u8]) -> ::Result<()> {
         self.storage
-            .get(chunk)
+            .get(&chunk.file)
+            .and_then(|file| file.data.get(&chunk.chunk))
             .and_then(|chunk_map| chunk_map.get(&version.as_ref().map(|v| v.load())))
             .ok_or_else(|| ::Error::NotFound)
             .and_then(|object| {
@@ -69,7 +105,9 @@ impl InnerMockStorage {
     fn create(&mut self, chunk: &ChunkDescriptor, version: Option<Version>,
               data: &[u8]) -> ::Result<()> {
         self.storage
-            .entry(chunk.clone())
+            .entry(chunk.file.clone())
+            .or_insert_with(|| MockFile::default())
+            .data.entry(chunk.chunk.clone())
             .or_insert_with(|| HashMap::new())
             .entry(version.map(|v| v.load()))
             .or_insert_with(|| data.to_owned());
@@ -78,13 +116,18 @@ impl InnerMockStorage {
 
     fn promote(&mut self, chunk: &ChunkDescriptor, version: Version) -> ::Result<()> {
         self.storage
-            .get_mut(chunk)
+            .get_mut(&chunk.file)
+            .unwrap_or(&mut MockFile::default())
+            .data.get_mut(&chunk.chunk)
             .unwrap_or(&mut HashMap::new())
             .remove(&Some(version.load()))
             .map(|object| {
                 let empty_map = &mut HashMap::new();
+                let empty_file = &mut MockFile::default();
                 let chunk_map = self.storage
-                    .get_mut(chunk)
+                    .get_mut(&chunk.file)
+                    .unwrap_or(empty_file)
+                    .data.get_mut(&chunk.chunk)
                     .unwrap_or(empty_map);
 
                 let mut new_map = HashMap::new();
@@ -98,7 +141,9 @@ impl InnerMockStorage {
     fn delete(&mut self, chunk: &ChunkDescriptor,
               version: Option<Version>) -> ::Result<()> {
         self.storage
-            .get_mut(&chunk)
+            .get_mut(&chunk.file)
+            .unwrap_or(&mut MockFile::default())
+            .data.get_mut(&chunk.chunk)
             .unwrap_or(&mut HashMap::new())
             .remove(&version.map(|v| v.load()));
         Ok(())
@@ -151,12 +196,16 @@ impl<S: Storage> StorageFuzzer<S> {
         // (the version => object map is represented as a Vec)
         let objects = gen_random_objects(num_objects, chunk_size,
                                          num_versions);
+        let file = Uuid::new_v4();
+
+        // Ensure metada for non-existent file gives NotFound.
+        self.storage.get_metadata(&FileDescriptor(Uuid::new_v4()))
+            .unwrap_err().assert_not_found();
 
         // Use a thread pool to run the tests.
         let mut pool = Pool::new(objects.len() as u32);
 
         pool.scoped(|scope| {
-            let file = Uuid::new_v4();
             for (chunk, versions) in objects {
                 let file = file.clone();
 
@@ -172,12 +221,11 @@ impl<S: Storage> StorageFuzzer<S> {
                     // After each one, read back the latest version and
                     // make sure it is there.
                     for (version, data) in versions.iter().enumerate() {
+                        let v = Some(Version::new(version + 1));
                         self.storage.create(&chunk_descriptor,
-                                            Some(Version::new(version + 1)),
-                                            data).unwrap();
+                                            v.clone(), data).unwrap();
                         self.storage.read(&chunk_descriptor,
-                                          Some(Version::new(version + 1)),
-                                          &mut buffer).unwrap();
+                                          v.clone(), &mut buffer).unwrap();
                         assert_eq!(data, &buffer);
                     }
 
@@ -189,6 +237,14 @@ impl<S: Storage> StorageFuzzer<S> {
                 });
             }
         });
+
+        // After all the mutations, set metadata (all chunks should be promoted)
+        self.storage.set_metadata(&FileDescriptor(file.clone()),
+                                  FileMetadata { size: num_objects }).unwrap();
+        // Also check the metadata.
+        let metadata = self.storage
+            .get_metadata(&FileDescriptor(file.clone())).unwrap();
+        assert_eq!(metadata.size, num_objects);
     }
 
     /// Ensure that the underlying Storage behaves equivalently to MockStorage

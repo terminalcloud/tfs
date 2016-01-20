@@ -32,8 +32,6 @@ mod local;
 mod impls;
 mod util;
 
-pub struct File;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Chunk(usize);
 
@@ -61,12 +59,19 @@ impl Clone for Version {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct FileMetadata {
+    pub size: usize
+}
+
 pub trait Cache: Send + Sync {
     fn read(&self, chunk: &ChunkDescriptor, version: Option<Version>,
             buf: &mut [u8]) -> ::Result<()>;
 }
 
 pub trait Storage: Cache {
+    fn set_metadata(&self, file: &FileDescriptor, metadata: FileMetadata) -> ::Result<()>;
+    fn get_metadata(&self, file: &FileDescriptor) -> ::Result<FileMetadata>;
     fn create(&self, chunk: &ChunkDescriptor, version: Option<Version>,
               data: &[u8]) -> ::Result<()>;
     fn promote(&self, chunk: &ChunkDescriptor, version: Version) -> ::Result<()>;

@@ -1,10 +1,18 @@
-use {Storage, Cache, ChunkDescriptor, Version};
+use {Storage, Cache, ChunkDescriptor, Version, FileMetadata, FileDescriptor};
 
 pub struct S3Storage {
     blah: usize
 }
 
 impl Storage for S3Storage {
+    fn set_metadata(&self, file: &FileDescriptor, metadata: FileMetadata) -> ::Result<()> {
+        Ok(())
+    }
+
+    fn get_metadata(&self, file: &FileDescriptor) -> ::Result<FileMetadata> {
+        Ok(FileMetadata { size: 0 })
+    }
+
     fn create(&self, chunk: &ChunkDescriptor, version: Option<Version>,
               data: &[u8]) -> ::Result<()> {
          Ok(())
