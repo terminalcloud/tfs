@@ -22,7 +22,7 @@ pub enum FlushMessage {
     ///
     /// If the Chunk has advanced to a version other than the given one,
     /// this operation is cancelled and should be ignored.
-    Flush(ChunkDescriptor, Option<Version>)
+    Flush(ChunkDescriptor, Version)
 }
 
 #[derive(Clone)]
@@ -82,23 +82,28 @@ impl FlushPool {
                     // Schedule this task to be restarted under panics.
                     sentinel.1 = Some(FlushMessage::Flush(chunk.clone(), version.clone()));
 
-                    let passed_version = version.as_ref().map(|v| v.load());
+                    let passed_version = version.load();
                     let current_version = local.version(&chunk);
 
-                    // The versions are the same at the beginning of our read.
-                    if current_version == passed_version {
-                        // Do a speculative read.
-                        let mut buffer: &mut [u8] = &mut [0; BLOCK_SIZE];
-                        local.read(&chunk, version.clone(), buffer).unwrap();
+                    // Assert the versions are the same at the beginning of our read.
+                    if current_version != Some(passed_version) { return }
 
-                        // After the read, ensure the version number is still
-                        // correct. If not, cancel.
-                        let current_version = local.version(&chunk);
-                        if current_version == passed_version {
-                            storage.create(&chunk, version, buffer)
-                                .unwrap()
-                        }
-                    } // Else the operation has been cancelled.
+                    // Do a speculative read.
+                    let mut buffer: &mut [u8] = &mut [0; BLOCK_SIZE];
+                    local.read(&chunk, Some(version.clone()), buffer).unwrap();
+
+                    // After the read, ensure the version number is still
+                    // correct. If not, cancel.
+                    let current_version = local.version(&chunk);
+                    if current_version != Some(passed_version) { return }
+
+                    // Upload the object to storage.
+                    storage.create(&chunk, Some(version.clone()), buffer)
+                        .unwrap();
+
+                    // Complete the flush.
+                    local.complete_flush(&chunk, version)
+                        .unwrap();
                 }
             }
         }

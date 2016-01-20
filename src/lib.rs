@@ -1,6 +1,5 @@
 //! Lazy, peer-to-peer immutable object store.
 
-extern crate fuse;
 extern crate scoped_threadpool;
 extern crate rand;
 extern crate uuid;
@@ -11,6 +10,7 @@ extern crate rwlock2;
 extern crate crossbeam;
 extern crate threadpool;
 extern crate atomic_option;
+extern crate vec_map;
 
 #[cfg(test)]
 extern crate tempfile;

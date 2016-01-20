@@ -60,7 +60,7 @@ impl LocalFs {
                                      data: &[u8]) -> ::Result<()> {
         // Write the data locally, filling a previously unfilled chunk.
         let blob = try!(self.get_or_create_blob(&chunk.file));
-        let mut blob_guard = blob.write().unwrap();
+        let mut blob_guard = blob.read().unwrap();
         blob_guard.fill(chunk.chunk, version, data)
     }
 
@@ -78,9 +78,22 @@ impl LocalFs {
 
         // Queue the new versioned chunk to be flushed.
         self.flush.push(FlushMessage::Flush(chunk.clone(),
-                                            Some(Version::new(version))));
+                                            Version::new(version)));
 
         Ok(())
+    }
+
+    pub fn complete_flush(&self, chunk: &ChunkDescriptor,
+                          version: Version) -> ::Result<()> {
+        let blob = try!(self.get_or_create_blob(&chunk.file));
+        let blob_guard = blob.read().unwrap();
+
+        if let Some(rw) = blob_guard.as_read_write() {
+            rw.complete_flush(chunk.chunk, version)
+        } else {
+            // The blob has already become read only.
+            Ok(())
+        }
     }
 
     /// Efficiently create a Blob if it doesn't exist.

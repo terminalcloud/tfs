@@ -65,7 +65,7 @@ impl Fs {
             let res = iter::once(&self.inner.local as &Cache)
                 .chain(self.inner.caches.iter().map(|c| &**c))
                 .chain(iter::once(&self.inner.storage as &Cache))
-                .fold(Err(::Error::NotFound), |res, cache| {
+                .fold(Err(::Error::Retry), |res, cache| {
                     res.or_else(|_| cache.read(chunk, version.clone(), buf))
                 }).and_then(|_| {
                     // Write back the data we got to our cache.
