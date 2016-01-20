@@ -6,8 +6,8 @@ impl Storage for Box<Storage> {
         (**self).create(chunk, version, data)
     }
 
-    fn promote(&self, chunk: &ChunkDescriptor) -> ::Result<()> {
-        (**self).promote(chunk)
+    fn promote(&self, chunk: &ChunkDescriptor, version: Version) -> ::Result<()> {
+        (**self).promote(chunk, version)
     }
 
     fn delete(&self, chunk: &ChunkDescriptor,

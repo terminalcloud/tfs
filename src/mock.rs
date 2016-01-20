@@ -4,11 +4,11 @@ use uuid::Uuid;
 
 use std::collections::HashMap;
 use std::sync::RwLock;
-use std::io::{self, Write};
+use std::io::Write;
 use std::mem;
 
 use util::test::gen_random_objects;
-use {Storage, Cache, ChunkDescriptor, Version, Chunk, FileDescriptor};
+use {Storage, Cache, ChunkDescriptor, Version, FileDescriptor};
 
 pub struct MockStorage {
     inner: RwLock<InnerMockStorage>
@@ -40,8 +40,8 @@ impl Storage for MockStorage {
         self.inner.write().unwrap().create(chunk, version, data)
     }
 
-    fn promote(&self, chunk: &ChunkDescriptor) -> ::Result<()> {
-        self.inner.write().unwrap().promote(chunk)
+    fn promote(&self, chunk: &ChunkDescriptor, version: Version) -> ::Result<()> {
+        self.inner.write().unwrap().promote(chunk, version)
     }
 
     fn delete(&self, chunk: &ChunkDescriptor,
@@ -76,16 +76,12 @@ impl InnerMockStorage {
         Ok(())
     }
 
-    fn promote(&mut self, chunk: &ChunkDescriptor) -> ::Result<()> {
-        self.storage.get(chunk)
-            .unwrap_or(&HashMap::new())
-            .keys().cloned().max()
-            .and_then(|promotion_target_version| {
-                self.storage
-                    .get_mut(chunk)
-                    .unwrap_or(&mut HashMap::new())
-                    .remove(&promotion_target_version)
-            }).map(|object| {
+    fn promote(&mut self, chunk: &ChunkDescriptor, version: Version) -> ::Result<()> {
+        self.storage
+            .get_mut(chunk)
+            .unwrap_or(&mut HashMap::new())
+            .remove(&Some(version.load()))
+            .map(|object| {
                 let empty_map = &mut HashMap::new();
                 let chunk_map = self.storage
                     .get_mut(chunk)
@@ -177,16 +173,17 @@ impl<S: Storage> StorageFuzzer<S> {
                     // make sure it is there.
                     for (version, data) in versions.iter().enumerate() {
                         self.storage.create(&chunk_descriptor,
-                                            Some(Version::new(version)),
+                                            Some(Version::new(version + 1)),
                                             data).unwrap();
                         self.storage.read(&chunk_descriptor,
-                                          Some(Version::new(version)),
+                                          Some(Version::new(version + 1)),
                                           &mut buffer).unwrap();
                         assert_eq!(data, &buffer);
                     }
 
-                    // Ensure that promotion will save the last version.
-                    self.storage.promote(&chunk_descriptor).unwrap();
+                    // Promote the last version.
+                    self.storage.promote(&chunk_descriptor,
+                                         Version::new(versions.len())).unwrap();
                     self.storage.read(&chunk_descriptor, None, &mut buffer).unwrap();
                     assert_eq!(&buffer, versions.last().unwrap())
                 });

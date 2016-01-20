@@ -1,8 +1,8 @@
 use std::sync::Arc;
-use std::{io, iter};
+use std::iter;
 
 use local::LocalFs;
-use {Storage, Cache, ChunkDescriptor, FileDescriptor, Version};
+use {Storage, Cache, ChunkDescriptor, FileDescriptor, Version, Chunk};
 
 #[derive(Clone)]
 pub struct Fs {
@@ -90,10 +90,15 @@ impl Fs {
     }
 
     pub fn freeze(&self, file: &FileDescriptor) -> ::Result<()> {
-        // For all pinned chunks:
-        //   - upload non-versioned chunk to unpin
-        // For all unpinned chunks:
-        //   - promote
+        let versions = try!(self.local().freeze(file));
+
+        // Promote all chunks that need to be promoted.
+        for (chunk, version) in versions {
+            let (chunk, version) = (Chunk(chunk), Version::new(version));
+            let chunk_descriptor = ChunkDescriptor { chunk: chunk, file: file.clone() };
+            try!(self.storage().promote(&chunk_descriptor, version));
+        }
+
         Ok(())
     }
 

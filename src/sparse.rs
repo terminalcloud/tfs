@@ -1,10 +1,12 @@
 use vec_map::VecMap;
+use rwlock2::RwLock;
 
+use std::collections::HashMap;
 use std::fs::File;
 use std::sync::{Mutex, Condvar, MutexGuard};
 use std::io;
 
-use std::os::unix::io::AsRawFd;
+use std::os::unix::io::{AsRawFd, FromRawFd};
 
 use {Chunk, Version};
 
@@ -28,12 +30,36 @@ impl Blob {
 
     /// Freeze this Blob into a ReadOnly Blob.
     ///
+    /// Returns a map of chunk index to version for all chunks that should
+    /// be promoted on the backend Storage.
+    ///
     /// If the blob is already read-only, does nothing.
-    pub fn freeze(self) -> ::Result<Blob> {
-        Ok(match self {
-            this @ Blob::ReadOnly(_) => this,
-            Blob::ReadWrite(versioned) => Blob::ReadOnly(try!(versioned.freeze()))
-        })
+    pub fn freeze(this: &RwLock<Self>) -> ::Result<HashMap<usize, usize>> {
+        loop {
+            match *this.read().unwrap() {
+                Blob::ReadOnly(_) => return Ok(HashMap::new()),
+                Blob::ReadWrite(ref rw) => rw.wait_for_freeze()
+            };
+
+            let mut blob_guard = this.write().unwrap();
+
+            // Try to freeze
+            let (ro, versions) = match *blob_guard {
+                Blob::ReadOnly(_) => return Ok(HashMap::new()),
+                Blob::ReadWrite(ref mut rw) => {
+                    if let Ok(res) = rw.optimistic_freeze() {
+                        res
+                    } else {
+                        // If the freeze now fails, retry.
+                        continue
+                    }
+                }
+            };
+
+            // Freeze successful.
+            *blob_guard = Blob::ReadOnly(ro);
+            return Ok(versions)
+        }
     }
 
     /// Read the chunk into the buffer.
@@ -152,6 +178,20 @@ impl RawSparseFile {
     pub fn evict(&self, chunk: Chunk) -> ::Result<()> {
         try!(self.file.punch(chunk.0 * BLOCK_SIZE, BLOCK_SIZE));
         Ok(())
+    }
+
+    pub fn try_clone(&self) -> ::Result<Self> {
+        use libc::{dup, c_int};
+
+        let file = unsafe {
+            let duplicated = try!(cvt(dup(self.file.as_raw_fd()) as i64));
+            File::from_raw_fd(duplicated as c_int)
+        };
+
+        Ok(RawSparseFile {
+            file: file,
+            size: self.size
+        })
     }
 }
 
@@ -275,31 +315,44 @@ impl VersionedSparseFile {
 
     }
 
-    pub fn freeze(self) -> ::Result<ReadOnlySparseFile> {
+    fn wait_for_freeze(&self) {
         // Wait for every chunk to enter into the stable state.
-        let locks = try!(self.file.context.values()
+        //
+        // NOTE: we acquire the locks one by one, as opposed to
+        // all at once. This may or may not be ideal, to be determined.
+        self.file.context.values()
             .map(|state| state.wait_for_freeze())
-            .collect::<::Result<Vec<_>>>());
+            .count();
+    }
 
-        let read_only_context = locks.into_iter().map(|lock| {
-            let read_state = match *lock {
-                VersionedChunkState::Evicted => ReadChunkState::Evicted,
-                VersionedChunkState::Stable => ReadChunkState::Stable,
-                e => panic!("Invalid state for freezing: {:?}!", e)
-            };
+    fn optimistic_freeze(&mut self) -> ::Result<(ReadOnlySparseFile,
+                                                 HashMap<usize, usize>)> {
+        let mut versions = HashMap::with_capacity(self.file.file.size);
+        let read_only_context = try!(self.file.context.iter_mut()
+            .enumerate()
+            .map(|(index, (_, md))| {
+                let read_state = match *md.state.get_mut().unwrap() {
+                    VersionedChunkState::Evicted => ReadChunkState::Evicted,
+                    VersionedChunkState::Stable => ReadChunkState::Stable,
 
-            ReadChunkMetadata {
-                state: Mutex::new(read_state),
-                cond: Condvar::new()
-            }
-        }).enumerate().collect();
+                    // If we get to an invalid state, indicate we should retry.
+                    _ => return Err(::Error::Retry)
+                };
 
-        Ok(ReadOnlySparseFile {
+                versions.insert(index, md.version.load());
+
+                Ok((index, ReadChunkMetadata {
+                    state: Mutex::new(read_state),
+                    cond: Condvar::new()
+                }))
+        }).collect::<::Result<VecMap<ReadChunkMetadata>>>());
+
+        Ok((ReadOnlySparseFile {
             file: SparseFile {
-                file: self.file.file,
+                file: try!(self.file.file.try_clone()),
                 context: read_only_context
             }
-        })
+        }, versions))
     }
 }
 
@@ -488,13 +541,13 @@ impl VersionedChunkMetadata {
         }
     }
 
-    fn wait_for_freeze(&self) -> ::Result<MutexGuard<VersionedChunkState>> {
+    fn wait_for_freeze(&self) -> MutexGuard<VersionedChunkState> {
         use self::VersionedChunkState::*;
 
         let mut state_lock = self.state.lock().unwrap();
         loop {
             match *state_lock {
-                Stable | Evicted => return Ok(state_lock),
+                Stable | Evicted => return state_lock,
                 Dirty | Reserved => state_lock = self.cond.wait(state_lock).unwrap()
             }
         }
@@ -665,8 +718,6 @@ mod test {
                  VersionedSparseFile, ReadOnlySparseFile};
     use {Chunk, Version};
 
-    use std::sync::RwLock;
-
     #[test]
     fn test_sparse_file_ext() {
         let file = tempfile().unwrap();
@@ -736,13 +787,29 @@ mod test {
     }
 
     #[test]
+    fn test_raw_sparse_file_clone() {
+        use util::test::gen_random_chunk;
+
+        let sparse_file = RawSparseFile::new(tempfile().unwrap(), 10);
+        let other = sparse_file.try_clone().unwrap();
+
+        let buffer = gen_random_chunk(BLOCK_SIZE);
+        sparse_file.write(Chunk(2), &buffer).unwrap();
+
+        let read_buf: &mut [u8] = &mut [0; BLOCK_SIZE];
+        other.read(Chunk(2), read_buf).unwrap();
+
+        assert_eq!(&*buffer, read_buf);
+    }
+
+    #[test]
     fn test_read_only_sparse_file() {
         const MAX_CHUNKS: usize = 1024;
 
         use util::test::gen_random_chunk;
 
         let raw_sparse_file = RawSparseFile::new(tempfile().unwrap(), MAX_CHUNKS);
-        let mut sparse_file = ReadOnlySparseFile::new(raw_sparse_file);
+        let sparse_file = ReadOnlySparseFile::new(raw_sparse_file);
         let buffers = vec![gen_random_chunk(BLOCK_SIZE); MAX_CHUNKS];
 
         // For each chunk:

@@ -18,7 +18,6 @@ extern crate tempfile;
 use uuid::Uuid;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::io;
 
 pub use error::{Error, Result};
 
@@ -70,7 +69,7 @@ pub trait Cache: Send + Sync {
 pub trait Storage: Cache {
     fn create(&self, chunk: &ChunkDescriptor, version: Option<Version>,
               data: &[u8]) -> ::Result<()>;
-    fn promote(&self, chunk: &ChunkDescriptor) -> ::Result<()>;
+    fn promote(&self, chunk: &ChunkDescriptor, version: Version) -> ::Result<()>;
     fn delete(&self, chunk: &ChunkDescriptor,
               version: Option<Version>) -> ::Result<()>;
 }

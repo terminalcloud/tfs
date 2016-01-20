@@ -1,4 +1,3 @@
-use terminal_linked_hash_map::LinkedHashMap;
 use rwlock2::{RwLock, RwLockReadGuard};
 use crossbeam::sync::MsQueue;
 use atomic_option::AtomicOption;
@@ -6,7 +5,6 @@ use atomic_option::AtomicOption;
 use std::fs::OpenOptions;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
-use std::sync::Mutex;
 use std::sync::atomic::Ordering;
 use std::path::PathBuf;
 
@@ -60,7 +58,7 @@ impl LocalFs {
                                      data: &[u8]) -> ::Result<()> {
         // Write the data locally, filling a previously unfilled chunk.
         let blob = try!(self.get_or_create_blob(&chunk.file));
-        let mut blob_guard = blob.read().unwrap();
+        let blob_guard = blob.read().unwrap();
         blob_guard.fill(chunk.chunk, version, data)
     }
 
@@ -81,6 +79,11 @@ impl LocalFs {
                                             Version::new(version)));
 
         Ok(())
+    }
+
+    pub fn freeze(&self, file: &FileDescriptor) -> ::Result<HashMap<usize, usize>> {
+        let blob = try!(self.get_or_create_blob(file));
+        Blob::freeze(&*blob)
     }
 
     pub fn complete_flush(&self, chunk: &ChunkDescriptor,

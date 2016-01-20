@@ -10,7 +10,7 @@ impl Storage for S3Storage {
          Ok(())
     }
 
-    fn promote(&self, chunk: &ChunkDescriptor) -> ::Result<()> {
+    fn promote(&self, chunk: &ChunkDescriptor, version: Version) -> ::Result<()> {
         Ok(())
     }
 
