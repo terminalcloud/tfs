@@ -8,7 +8,7 @@ use std::io;
 
 use std::os::unix::io::{AsRawFd, FromRawFd};
 
-use {Chunk, Version};
+use {Chunk, Version, FileMetadata};
 
 pub const BLOCK_SIZE: usize = 2048;
 
@@ -28,16 +28,22 @@ impl Blob {
         Blob::ReadWrite(VersionedSparseFile::new(RawSparseFile::new(file, size)))
     }
 
+    /// Open a new ReadOnly blob with the given number of chunks.
+    pub fn open(file: File, size: usize) -> Blob {
+        Blob::ReadOnly(ReadOnlySparseFile::new(RawSparseFile::new(file, size)))
+    }
+
     /// Freeze this Blob into a ReadOnly Blob.
     ///
     /// Returns a map of chunk index to version for all chunks that should
     /// be promoted on the backend Storage.
     ///
     /// If the blob is already read-only, does nothing.
-    pub fn freeze(this: &RwLock<Self>) -> ::Result<HashMap<usize, usize>> {
+    pub fn freeze(this: &RwLock<Self>) -> ::Result<(HashMap<usize, usize>,
+                                                    FileMetadata)> {
         loop {
             match *this.read().unwrap() {
-                Blob::ReadOnly(_) => return Ok(HashMap::new()),
+                Blob::ReadOnly(_) => return Err(::Error::AlreadyFrozen),
                 Blob::ReadWrite(ref rw) => rw.wait_for_freeze()
             };
 
@@ -45,7 +51,7 @@ impl Blob {
 
             // Try to freeze
             let (ro, versions) = match *blob_guard {
-                Blob::ReadOnly(_) => return Ok(HashMap::new()),
+                Blob::ReadOnly(_) => return Err(::Error::AlreadyFrozen),
                 Blob::ReadWrite(ref mut rw) => {
                     if let Ok(res) = rw.optimistic_freeze() {
                         res
@@ -57,8 +63,9 @@ impl Blob {
             };
 
             // Freeze successful.
+            let metadata = FileMetadata { size: ro.file.file.size };
             *blob_guard = Blob::ReadOnly(ro);
-            return Ok(versions)
+            return Ok((versions, metadata))
         }
     }
 

@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::iter;
 
 use local::LocalFs;
-use {Storage, Cache, ChunkDescriptor, FileDescriptor, Version, Chunk};
+use {Storage, Cache, ChunkDescriptor, FileDescriptor, Version, Chunk, FileMetadata};
 
 #[derive(Clone)]
 pub struct Fs {
@@ -30,6 +30,26 @@ impl Fs {
 
     pub fn init(&self) -> ::Result<()> {
         self.inner.local.init_flush_thread(self.clone())
+    }
+
+    /// Create a new Read-Write object.
+    ///
+    /// It will be addressable via the given FileDescriptor, and its initial
+    /// properties are set to the given FileMetadata.
+    pub fn create(&self, file: FileDescriptor, metadata: FileMetadata) -> ::Result<()> {
+        self.local().create(file, metadata)
+    }
+
+    /// Open an existing Read-Only object.
+    ///
+    /// Returns the metadata associated with that object.
+    ///
+    /// It should have been created with the given FileDescriptor.
+    pub fn open(&self, file: FileDescriptor) -> ::Result<FileMetadata> {
+        let metadata = try!(self.storage().get_metadata(&file));
+        try!(self.local().open(file, metadata.clone()));
+
+        Ok(metadata)
     }
 
     pub fn read(&self, chunk: &ChunkDescriptor, buf: &mut [u8]) -> ::Result<()> {
@@ -65,7 +85,7 @@ impl Fs {
             let res = iter::once(&self.inner.local as &Cache)
                 .chain(self.inner.caches.iter().map(|c| &**c))
                 .chain(iter::once(&self.inner.storage as &Cache))
-                .fold(Err(::Error::Retry), |res, cache| {
+                .fold(Err(::Error::NotFound), |res, cache| {
                     res.or_else(|_| cache.read(chunk, version.clone(), buf))
                 }).and_then(|_| {
                     // Write back the data we got to our cache.
@@ -90,7 +110,7 @@ impl Fs {
     }
 
     pub fn freeze(&self, file: &FileDescriptor) -> ::Result<()> {
-        let versions = try!(self.local().freeze(file));
+        let (versions, metadata) = try!(self.local().freeze(file));
 
         // Promote all chunks that need to be promoted.
         for (chunk, version) in versions {
@@ -99,10 +119,12 @@ impl Fs {
             try!(self.storage().promote(&chunk_descriptor, version));
         }
 
+        try!(self.storage().set_metadata(file, metadata));
+
         Ok(())
     }
 
     pub fn local(&self) -> &LocalFs { &self.inner.local }
-    pub fn storage(&self) -> &Storage { &*self.inner.storage }
+    pub fn storage(&self) -> &Storage { &self.inner.storage }
 }
 

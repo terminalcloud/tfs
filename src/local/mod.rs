@@ -2,7 +2,7 @@ use rwlock2::{RwLock, RwLockReadGuard};
 use crossbeam::sync::MsQueue;
 use atomic_option::AtomicOption;
 
-use std::fs::OpenOptions;
+use std::fs::{File, OpenOptions};
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::sync::atomic::Ordering;
@@ -10,9 +10,10 @@ use std::path::PathBuf;
 
 use local::flush::{FlushMessage, FlushPool};
 
+use util::RwLockExt;
 use fs::Fs;
 use sparse::Blob;
-use {Storage, Cache, ChunkDescriptor, FileDescriptor, Version};
+use {Storage, Cache, ChunkDescriptor, FileDescriptor, Version, FileMetadata};
 
 mod flush;
 
@@ -33,6 +34,16 @@ impl LocalFs {
             flush: MsQueue::new(),
             pool: AtomicOption::empty()
         }
+    }
+
+    /// Insert a handle to a new Read-Write object with the given starting metadata.
+    pub fn create(&self, file: FileDescriptor, metadata: FileMetadata) -> ::Result<()> {
+        self.new_blob(file, metadata, |f, m| Blob::new(f, m.size))
+    }
+
+    /// Insert a handle to an existing Read-Only object with the given metadata.
+    pub fn open(&self, file: FileDescriptor, metadata: FileMetadata) -> ::Result<()> {
+        self.new_blob(file, metadata, |f, m| Blob::open(f, m.size))
     }
 
     pub fn version(&self, chunk: &ChunkDescriptor) -> Option<usize> {
@@ -57,7 +68,7 @@ impl LocalFs {
                                      version: Option<Version>,
                                      data: &[u8]) -> ::Result<()> {
         // Write the data locally, filling a previously unfilled chunk.
-        let blob = try!(self.get_or_create_blob(&chunk.file));
+        let blob = try!(self.get_blob(&chunk.file));
         let blob_guard = blob.read().unwrap();
         blob_guard.fill(chunk.chunk, version, data)
     }
@@ -69,7 +80,7 @@ impl LocalFs {
         //   - bump the version
 
         // Queue new versioned chunk to be flushed. When done, unpin.
-        let blob = try!(self.get_or_create_blob(&chunk.file));
+        let blob = try!(self.get_blob(&chunk.file));
         let mut blob_guard = blob.write().unwrap();
         let version = try!(blob_guard.assert_versioned_mut()
             .write(chunk.chunk, data));
@@ -81,14 +92,15 @@ impl LocalFs {
         Ok(())
     }
 
-    pub fn freeze(&self, file: &FileDescriptor) -> ::Result<HashMap<usize, usize>> {
-        let blob = try!(self.get_or_create_blob(file));
+    pub fn freeze(&self, file: &FileDescriptor) -> ::Result<(HashMap<usize, usize>,
+                                                             FileMetadata)> {
+        let blob = try!(self.get_blob(file));
         Blob::freeze(&*blob)
     }
 
     pub fn complete_flush(&self, chunk: &ChunkDescriptor,
                           version: Version) -> ::Result<()> {
-        let blob = try!(self.get_or_create_blob(&chunk.file));
+        let blob = try!(self.get_blob(&chunk.file));
         let blob_guard = blob.read().unwrap();
 
         if let Some(rw) = blob_guard.as_read_write() {
@@ -99,54 +111,48 @@ impl LocalFs {
         }
     }
 
-    /// Efficiently create a Blob if it doesn't exist.
-    ///
-    /// If the Blob already exists, only a read guard will be acquired.
-    fn get_or_create_blob(&self, fd: &FileDescriptor) -> ::Result<BlobGuard> {
-        // This code is very ugly to have the most optimal acquisition of locks.
+    fn get_blob(&self, fd: &FileDescriptor) -> ::Result<BlobGuard> {
+        let reader = self.files.read().unwrap();
+
+        // Unfortunate double-lookup here.
         //
-        // It is conceptually just:
-        //    self.files.entry(fd).or_insert_with(|| new_blob())
-
-        // The file is not present at the start of the operation.
-        if self.files.read().unwrap().get(fd).is_none() {
-            // At this stage we only *may* need to insert the file,
-            // as it may have been inserted by another thread as soon
-            // as we released the read guard, so we need to check again
-            // after acquiring the write lock.
-            match self.files.write().unwrap().entry(fd.clone()) {
-                // Insert the file.
-                Entry::Vacant(v) => {
-                    let blob = try!(self.create_blob(&fd));
-                    v.insert(RwLock::new(blob));
-                },
-                // Another thread beat us to the punch.
-                _ => {}
-            }
+        // If you see a better way please fix it.
+        if reader.contains_key(fd) {
+            Ok(reader.map(|map| map.get(fd).unwrap()))
+        } else {
+            Err(::Error::NotFound)
         }
-
-        // Now the file is certainly present.
-        Ok(self.files.read().unwrap().map(|map| map.get(fd).unwrap()))
     }
 
-    fn create_blob(&self, fd: &FileDescriptor) -> ::Result<Blob> {
-        let path = self.mount.join(fd.0.to_string());
-        let file = try!(OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .open(path));
+    /// Add a new Blob to our internal map.
+    fn new_blob<F>(&self, file: FileDescriptor, metadata: FileMetadata,
+                   constructor: F) -> ::Result<()>
+    where F: FnOnce(File, FileMetadata) -> Blob {
+        self.files.if_then::<_, _, ::Result<()>>(
+            |files| !files.contains_key(&file),
+            |files| {
+                let fd = file.clone();
+                let path = self.mount.join(fd.0.to_string());
+                let file = try!(OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .create(true)
+                    .open(path));
+                let blob = constructor(file, metadata);
 
-        // TODO: Resume from existing chunks file.
-        // TODO: Use a variable size.
-        Ok(Blob::new(file, 1024))
+                files.insert(fd.clone(), RwLock::new(blob));
+
+                Ok(())
+            }
+        ).unwrap_or(Err(::Error::AlreadyExists))
     }
+
 }
 
 impl Cache for LocalFs {
     fn read(&self, chunk: &ChunkDescriptor, _: Option<Version>,
             buf: &mut [u8]) -> ::Result<()> {
-        self.get_or_create_blob(&chunk.file)
+        self.get_blob(&chunk.file)
             .and_then(|blob| blob.read().unwrap().read(chunk.chunk, buf))
     }
 }

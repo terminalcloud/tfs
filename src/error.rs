@@ -6,6 +6,8 @@ pub type Result<T> = ::std::result::Result<T, Error>;
 pub enum Error {
     NotFound,
     Retry,
+    AlreadyExists,
+    AlreadyFrozen,
     /// Indicates an operation failed because it must be filled
     /// by a later Cache or Storage before it can succeed.
     Reserved,
@@ -36,6 +38,22 @@ impl Error {
             e => panic!("Not not-found error: {:?}!", e)
         }
     }
+
+    /// Testing helper for asserting this error is Error::AlreadyExists
+    pub fn assert_already_exists(self) {
+        match self {
+            Error::AlreadyExists => {},
+            e => panic!("Not already-exists error: {:?}!", e)
+        }
+    }
+
+    /// Testing helper for asserting this error is Error::AlreadyFrozen
+    pub fn assert_already_frozen(self) {
+        match self {
+            Error::AlreadyFrozen => {},
+            e => panic!("Not already-frozen error: {:?}!", e)
+        }
+    }
 }
 
 impl From<io::Error> for Error {
@@ -55,6 +73,8 @@ impl ::std::error::Error for Error {
         match *self {
             Error::NotFound => "Not Found",
             Error::Retry => "Retry",
+            Error::AlreadyExists => "Already Exists",
+            Error::AlreadyFrozen => "Already Frozen",
             Error::Reserved => "Reserved",
             Error::Io(ref io) => io.description()
         }
@@ -62,10 +82,8 @@ impl ::std::error::Error for Error {
 
     fn cause(&self) -> Option<&::std::error::Error> {
         match *self {
-            Error::NotFound => None,
-            Error::Retry => None,
-            Error::Reserved => None,
-            Error::Io(ref io) => Some(io)
+            Error::Io(ref io) => Some(io),
+            _ => None
         }
     }
 }
