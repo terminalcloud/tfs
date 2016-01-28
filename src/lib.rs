@@ -1,6 +1,5 @@
 //! Lazy, peer-to-peer immutable object store.
 
-extern crate scoped_threadpool;
 extern crate rand;
 extern crate uuid;
 extern crate libc;
@@ -8,9 +7,13 @@ extern crate bit_vec;
 extern crate terminal_linked_hash_map;
 extern crate rwlock2;
 extern crate crossbeam;
-extern crate threadpool;
+extern crate scoped_pool;
 extern crate atomic_option;
 extern crate vec_map;
+extern crate slab;
+
+#[macro_use]
+extern crate log;
 
 #[cfg(test)]
 extern crate tempfile;
@@ -18,6 +21,7 @@ extern crate tempfile;
 use uuid::Uuid;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::borrow::Cow;
 
 pub use error::{Error, Result};
 
@@ -25,12 +29,29 @@ pub mod fs;
 pub mod s3;
 pub mod p2p;
 pub mod sparse;
-pub mod mock;
+// pub mod mock;
 pub mod error;
 
 mod local;
 mod impls;
 mod util;
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub struct BlockIndex(usize);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct VolumeId(Uuid);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ContentId([u8; 32]);
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct VolumeName<'a>(Cow<'a, str>);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct VolumeMetadata {
+    size: usize
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Chunk(usize);
