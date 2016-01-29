@@ -1,4 +1,3 @@
-use vec_map::VecMap;
 use rwlock2::RwLock;
 use slab::Slab;
 

@@ -1,6 +1,5 @@
 use rwlock2::{RwLock, RwLockReadGuard};
 use crossbeam::sync::MsQueue;
-use atomic_option::AtomicOption;
 use terminal_linked_hash_map::LinkedHashMap;
 use scoped_pool::Scope;
 
