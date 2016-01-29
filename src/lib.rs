@@ -26,8 +26,8 @@ use std::borrow::Cow;
 pub use error::{Error, Result};
 
 pub mod fs;
-pub mod s3;
-pub mod p2p;
+// pub mod s3;
+// pub mod p2p;
 pub mod sparse;
 // pub mod mock;
 pub mod error;
@@ -35,6 +35,7 @@ pub mod error;
 mod local;
 mod impls;
 mod util;
+mod signal;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct BlockIndex(usize);
@@ -48,21 +49,15 @@ pub struct ContentId([u8; 32]);
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct VolumeName<'a>(Cow<'a, str>);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct VolumeMetadata {
-    size: usize
+impl<'a> VolumeName<'a> {
+    pub fn new<I: Into<Cow<'a, str>>>(from: I) -> Self {
+        VolumeName(from.into())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Chunk(usize);
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct FileDescriptor(Uuid);
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ChunkDescriptor {
-    file: FileDescriptor,
-    chunk: Chunk
+pub struct VolumeMetadata {
+    size: usize
 }
 
 #[derive(Debug)]
@@ -86,17 +81,14 @@ pub struct FileMetadata {
 }
 
 pub trait Cache: Send + Sync {
-    fn read(&self, chunk: &ChunkDescriptor, version: Option<Version>,
-            buf: &mut [u8]) -> ::Result<()>;
+    fn read(&self, id: ContentId, buf: &mut [u8]) -> ::Result<()>;
 }
 
 pub trait Storage: Cache {
-    fn set_metadata(&self, file: &FileDescriptor, metadata: FileMetadata) -> ::Result<()>;
-    fn get_metadata(&self, file: &FileDescriptor) -> ::Result<FileMetadata>;
-    fn create(&self, chunk: &ChunkDescriptor, version: Option<Version>,
-              data: &[u8]) -> ::Result<()>;
-    fn promote(&self, chunk: &ChunkDescriptor, version: Version) -> ::Result<()>;
-    fn delete(&self, chunk: &ChunkDescriptor,
-              version: Option<Version>) -> ::Result<()>;
+    fn set_metadata(&self, volume: VolumeName, metadata: VolumeMetadata) -> ::Result<()>;
+    fn get_metadata(&self, volume: &VolumeName) -> ::Result<VolumeMetadata>;
+
+    fn create(&self, id: ContentId, data: &[u8]) -> ::Result<()>;
+    fn delete(&self, id: ContentId) -> ::Result<()>;
 }
 

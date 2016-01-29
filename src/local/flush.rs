@@ -2,7 +2,7 @@ use scoped_pool::Scope;
 
 use fs::Fs;
 use sparse::BLOCK_SIZE;
-use {ChunkDescriptor, Version, Cache};
+use {VolumeId, BlockIndex, Version, ContentId, Cache};
 
 /// Instructions sent from the main threads to the flushing threads.
 ///
@@ -22,7 +22,7 @@ pub enum FlushMessage {
     ///
     /// If the Chunk has advanced to a version other than the given one,
     /// this operation is cancelled and should be ignored.
-    Flush(ChunkDescriptor, Version)
+    Flush(VolumeId, BlockIndex, Version)
 }
 
 #[derive(Copy, Clone)]
@@ -75,30 +75,34 @@ impl<'fs, 'id> FlushPool<'fs, 'id> {
                         return Ok(false)
                     },
 
-                    FlushMessage::Flush(chunk, version) => {
+                    FlushMessage::Flush(volume, block, version) => {
                         // Schedule this task to be restarted under panics.
-                        sentinel.activate(FlushMessage::Flush(chunk.clone(), version.clone()));
+                        sentinel.activate(FlushMessage::Flush(volume.clone(),
+                                                              block,
+                                                              version.clone()));
 
-                        let passed_version = version.load();
-                        let current_version = local.version(&chunk);
+                        // let passed_version = version.load();
+                        // let current_version = local.version(&volume, block);
 
-                        // Assert the versions are the same at the beginning of our read.
-                        if current_version != Some(passed_version) { return Ok(true) }
+                        // // Assert the versions are the same at the beginning of our read.
+                        // if current_version != Some(passed_version) { return Ok(true) }
 
-                        // Do a speculative read.
-                        let mut buffer: &mut [u8] = &mut [0; BLOCK_SIZE];
-                        try!(local.read(&chunk, Some(version.clone()), buffer));
+                        // // Do a speculative read.
+                        // let mut buffer: &mut [u8] = &mut [0; BLOCK_SIZE];
+                        // try!(local.read(&volume, block, Some(version.clone()), buffer));
 
-                        // After the read, ensure the version number is still
-                        // correct. If not, cancel.
-                        let current_version = local.version(&chunk);
-                        if current_version != Some(passed_version) { return Ok(true) }
+                        // // After the read, ensure the version number is still
+                        // // correct. If not, cancel.
+                        // let current_version = local.version(&chunk);
+                        // if current_version != Some(passed_version) { return Ok(true) }
 
-                        // Upload the object to storage.
-                        try!(storage.create(&chunk, Some(version.clone()), buffer));
+                        // let content_id = unimplemented!();
 
-                        // Complete the flush.
-                        try!(local.complete_flush(&chunk, version));
+                        // // Upload the object to storage.
+                        // try!(storage.create(content_id, buffer));
+
+                        // // Complete the flush.
+                        // try!(local.complete_flush(&volume, block, version));
 
                         Ok(true)
                     }

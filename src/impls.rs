@@ -1,33 +1,26 @@
-use {Storage, Cache, ChunkDescriptor, Version, FileMetadata, FileDescriptor};
+use {Storage, Cache, VolumeName, VolumeMetadata, ContentId};
 
 impl Storage for Box<Storage> {
-    fn set_metadata(&self, file: &FileDescriptor, metadata: FileMetadata) -> ::Result<()> {
-        (**self).set_metadata(file, metadata)
+    fn set_metadata(&self, volume: VolumeName, metadata: VolumeMetadata) -> ::Result<()> {
+        (**self).set_metadata(volume, metadata)
     }
 
-    fn get_metadata(&self, file: &FileDescriptor) -> ::Result<FileMetadata> {
-        (**self).get_metadata(file)
+    fn get_metadata(&self, volume: &VolumeName) -> ::Result<VolumeMetadata> {
+        (**self).get_metadata(volume)
     }
 
-    fn create(&self, chunk: &ChunkDescriptor, version: Option<Version>,
-              data: &[u8]) -> ::Result<()> {
-        (**self).create(chunk, version, data)
+    fn create(&self, id: ContentId, data: &[u8]) -> ::Result<()> {
+        (**self).create(id, data)
     }
 
-    fn promote(&self, chunk: &ChunkDescriptor, version: Version) -> ::Result<()> {
-        (**self).promote(chunk, version)
-    }
-
-    fn delete(&self, chunk: &ChunkDescriptor,
-              version: Option<Version>) -> ::Result<()> {
-        (**self).delete(chunk, version)
+    fn delete(&self, id: ContentId) -> ::Result<()> {
+        (**self).delete(id)
     }
 }
 
 impl Cache for Box<Storage> {
-    fn read(&self, chunk: &ChunkDescriptor, version: Option<Version>,
-            buf: &mut [u8]) -> ::Result<()> {
-        (**self).read(chunk, version, buf)
+    fn read(&self, id: ContentId, buf: &mut [u8]) -> ::Result<()> {
+        (**self).read(id, buf)
     }
 }
 

@@ -11,7 +11,7 @@ use std::io;
 
 use std::os::unix::io::{AsRawFd, FromRawFd};
 
-use {Chunk, Version, FileMetadata};
+use {Version, FileMetadata};
 
 pub const BLOCK_SIZE: usize = 2048;
 
@@ -207,7 +207,7 @@ mod test {
 
     use sparse::{SparseFileExt, IndexedSparseFile, BLOCK_SIZE,
                  IndexAllocator, Index};
-    use {Chunk, Version};
+    use Version;
 
     #[test]
     fn test_sparse_file_ext() {

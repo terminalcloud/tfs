@@ -2,8 +2,7 @@ use std::sync::Arc;
 use std::iter;
 
 use local::LocalFs;
-use {Storage, Cache, ChunkDescriptor, FileDescriptor, Version, Chunk, FileMetadata,
-     VolumeId, VolumeName, VolumeMetadata, BlockIndex};
+use {Storage, Cache, Version, VolumeId, VolumeName, VolumeMetadata, BlockIndex};
 
 pub struct Fs<'id> {
     storage: Box<Storage>,
