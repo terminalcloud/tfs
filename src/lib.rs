@@ -8,6 +8,7 @@ extern crate rwlock2;
 extern crate crossbeam;
 extern crate scoped_pool;
 extern crate slab;
+extern crate vec_map;
 
 #[macro_use]
 extern crate log;
@@ -23,8 +24,8 @@ use std::borrow::Cow;
 pub use error::{Error, Result};
 
 pub mod fs;
-// pub mod s3;
-// pub mod p2p;
+pub mod s3;
+pub mod p2p;
 pub mod sparse;
 // pub mod mock;
 pub mod error;

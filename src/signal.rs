@@ -1,4 +1,4 @@
-use std::sync::{Mutex, MutexGuard, Condvar, LockResult, TryLockError};
+use rwlock2::{Mutex, MutexGuard, Condvar, LockResult, TryLockError};
 use std::ops::{Deref, DerefMut};
 
 pub struct Signal<T> {
@@ -39,6 +39,10 @@ impl<T> Signal<T> {
             cond: &self.cond
         })
     }
+
+    pub fn notify(&self) { self.cond().notify_one() }
+    pub fn notify_all(&self) { self.cond().notify_all() }
+    pub fn cond(&self) -> &Condvar { &self.cond }
 }
 
 impl<'signal, T> SignalGuard<'signal, T> {
@@ -50,6 +54,18 @@ impl<'signal, T> SignalGuard<'signal, T> {
             cond: self.cond
         }
     }
+
+    pub fn map<U, F>(self, cb: F) -> SignalGuard<'signal, U>
+    where F: FnOnce(&'signal mut T) -> &'signal mut U {
+        SignalGuard {
+            lock: MutexGuard::map(self.lock, cb),
+            cond: self.cond
+        }
+    }
+
+    pub fn notify(&self) { self.cond().notify_one() }
+    pub fn notify_all(&self) { self.cond().notify_all() }
+    pub fn cond(&self) -> &Condvar { &self.cond }
 }
 
 impl<'signal, T> Deref for SignalGuard<'signal, T> {

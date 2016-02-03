@@ -1,13 +1,10 @@
-use {Cache, ChunkDescriptor, Version};
+use {Cache, ContentId};
 
 pub struct P2PCache {
     blah: usize
 }
 
 impl Cache for P2PCache {
-    fn read(&self, chunk: &ChunkDescriptor, version: Option<Version>,
-            buf: &mut [u8]) -> ::Result<()> {
-        Ok(())
-    }
+    fn read(&self, id: ContentId, buf: &mut [u8]) -> ::Result<()> { unimplemented!() }
 }
 

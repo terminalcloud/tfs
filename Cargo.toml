@@ -9,10 +9,11 @@ rand = "0.3"
 uuid = "0.1"
 libc = "0.2"
 terminal-linked-hash-map = "0.1"
-rwlock2 = "0.1"
+rwlock2 = "0.2"
 crossbeam = "0.2"
 slab = "0.1"
 log = "0.3"
+vec_map = "0.4"
 
 [dev-dependencies]
 tempfile = "2.0"
