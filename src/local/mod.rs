@@ -1,4 +1,5 @@
 use rwlock2::{RwLock, RwLockReadGuard};
+use vec_map::VecMap;
 use crossbeam::sync::MsQueue;
 use terminal_linked_hash_map::LinkedHashMap;
 use scoped_pool::Scope;
@@ -6,12 +7,11 @@ use scoped_pool::Scope;
 use std::fs::{File, OpenOptions};
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
-use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::path::PathBuf;
 
 use local::flush::{FlushMessage, FlushPool};
-use local::chunk::{ChunkMap, ImmutableChunk};
+use local::chunk::{Chunk, MutableChunk, ImmutableChunk};
 
 use util::RwLockExt;
 use sparse::{IndexedSparseFile, Index};
@@ -25,7 +25,7 @@ pub struct LocalFs<'id> {
     mount: PathBuf,
     file: IndexedSparseFile<'id>,
 
-    volumes: RwLock<HashMap<VolumeId, RwLock<ChunkMap<'id>>>>,
+    volumes: RwLock<HashMap<VolumeId, ChunkMap<'id>>>,
     chunks: Mutex<LinkedHashMap<ContentId, Arc<ImmutableChunk<'id>>>>,
 
     flush: MsQueue<FlushMessage>
@@ -127,6 +127,18 @@ impl<'id> Cache for LocalFs<'id> {
         // self.get_blob(&chunk.file)
         //    .and_then(|blob| blob.read().unwrap().read(chunk.chunk, buf))
         unimplemented!()
+    }
+}
+
+struct ChunkMap<'id> {
+    blocks: RwLock<VecMap<Chunk<'id>>>
+}
+
+impl<'id> ChunkMap<'id> {
+    fn new() -> Self {
+        ChunkMap {
+            blocks: RwLock::new(VecMap::new())
+        }
     }
 }
 

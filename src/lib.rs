@@ -44,6 +44,10 @@ pub struct VolumeId(Uuid);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ContentId([u8; 32]);
 
+impl ContentId {
+    pub fn null() -> Self { ContentId([0; 32]) }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct VolumeName<'a>(Cow<'a, str>);
 

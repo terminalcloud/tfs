@@ -8,8 +8,6 @@ use std::marker::PhantomData;
 use std::sync::{Mutex, Condvar, MutexGuard};
 use std::io;
 
-use std::os::unix::io::{AsRawFd, FromRawFd};
-
 use {Version, FileMetadata};
 
 pub const BLOCK_SIZE: usize = 2048;
@@ -159,6 +157,7 @@ impl SparseFileExt for File {
     #[cfg(target_os = "linux")]
     fn punch(&self, offset: usize, size: usize) -> io::Result<()> {
         use libc::{fallocate, FALLOC_FL_PUNCH_HOLE, FALLOC_FL_KEEP_SIZE};
+        use std::os::unix::io::AsRawFd;
 
         unsafe {
             cvt(fallocate(self.as_raw_fd(),
@@ -174,6 +173,7 @@ impl SparseFileExt for File {
 
     fn pread(&self, offset: usize, buf: &mut [u8]) -> io::Result<usize> {
         use libc::pread;
+        use std::os::unix::io::AsRawFd;
 
         unsafe { cvt(pread(self.as_raw_fd(),
                            buf.as_mut_ptr() as *mut ::libc::c_void,
@@ -183,6 +183,7 @@ impl SparseFileExt for File {
 
     fn pwrite(&self, offset: usize, data: &[u8]) -> io::Result<usize> {
         use libc::pwrite;
+        use std::os::unix::io::AsRawFd;
 
         unsafe { cvt(pwrite(self.as_raw_fd(),
                             data.as_ptr() as *const ::libc::c_void,

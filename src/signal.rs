@@ -1,4 +1,4 @@
-use rwlock2::{Mutex, MutexGuard, Condvar, LockResult, TryLockError};
+use rwlock2::{Mutex, MutexGuard, Condvar, TryLockError};
 use std::ops::{Deref, DerefMut};
 
 pub struct Signal<T> {
@@ -18,6 +18,9 @@ impl<T> Signal<T> {
             cond: Condvar::new()
         }
     }
+
+    pub fn into_inner(self) -> T { self.state.into_inner().unwrap() }
+    pub fn get_mut(&mut self) -> &mut T { self.state.get_mut().unwrap() }
 
     pub fn lock(&self) -> SignalGuard<T> {
         SignalGuard {
@@ -60,6 +63,14 @@ impl<'signal, T> SignalGuard<'signal, T> {
         SignalGuard {
             lock: MutexGuard::map(self.lock, cb),
             cond: self.cond
+        }
+    }
+
+    pub fn filter_map<U, E, F>(self, cb: F) -> Result<SignalGuard<'signal, U>, (Self, E)>
+    where F: FnOnce(&'signal mut T) -> Result<&'signal mut U, E> {
+        match MutexGuard::filter_map(self.lock, cb) {
+            Ok(lock) => Ok(SignalGuard { lock: lock, cond: self.cond }),
+            Err((lock, error)) => Err((SignalGuard { lock: lock, cond: self.cond }, error))
         }
     }
 
