@@ -78,6 +78,13 @@ impl<'id> Chunk<'id> {
             }
         }
     }
+
+    pub fn version(&self) -> Option<usize> {
+        match *self {
+            Chunk::Mutable(ref m) => Some(m.version.load()),
+            _ => None
+        }
+    }
 }
 
 /// An exclusive guard over a chunk held while creating a new
@@ -128,6 +135,8 @@ impl<'id> MutableChunk<'id> {
             state: Signal::new((index, MutableChunkState::Dirty))
         }
     }
+
+    pub fn version(&self) -> &Version { &self.version }
 
     pub fn lock(&self) -> SignalGuard<(Index<'id>, MutableChunkState)> {
         self.state.lock()
@@ -200,24 +209,23 @@ impl<'id> ImmutableChunk<'id> {
     ///
     /// May *only* be called by the thread which initialized the chunk in
     /// the Reserved state.
-    pub fn complete_fill(&self, index: Index<'id>) -> ::Result<()> {
+    pub fn complete_fill(&self, index: Index<'id>) {
+        use self::ImmutableChunkState::*;
+
         let mut lock = self.state.lock();
 
         match *lock {
-            ImmutableChunkState::Evicted => return Err(::Error::Retry),
-            ImmutableChunkState::Reserved => *lock = ImmutableChunkState::Stable(index),
-            ImmutableChunkState::Stable(_) =>
-                panic!("Logic error - complete_fill called on Stable immutable chunk!")
+            Reserved => *lock = Stable(index),
+            Stable(_) => panic!("Logic error - complete_fill called on Stable immutable chunk!"),
+            Evicted => panic!("Logic error - complete_fill called on Evicted immutable chunk!")
         };
-
-        Ok(())
     }
 
     /// Wait for the chunk to be readable.
     ///
     /// Returns a lock on the Index associated with this chunk, which allows
     /// reading from the containing IndexedSparseFile.
-    pub fn wait_for_read(&self) -> ::Result<SignalGuard<Index<'id>>> {
+    pub fn wait_for_read(&self) -> Option<SignalGuard<Index<'id>>> {
         let mut lock = self.state.lock();
 
         loop {
@@ -228,9 +236,9 @@ impl<'id> ImmutableChunk<'id> {
                     ImmutableChunkState::Evicted => Err(false)
                 }
             }) {
-                Ok(lock) => return Ok(lock),
+                Ok(lock) => return Some(lock),
                 Err((l, true)) => lock = l.wait(),
-                Err((_, false)) => return Err(::Error::Retry)
+                Err((_, false)) => return None
             }
         }
     }
@@ -239,17 +247,30 @@ impl<'id> ImmutableChunk<'id> {
     ///
     /// Many threads may race to attempt an eviction, only one will succeed
     /// and receive the Index, which it then must deallocate from the
-    /// IndexedSparseFile. Threads receiving None should proceed without error.
-    pub fn begin_evict(&self) -> Option<Index<'id>> {
+    /// IndexedSparseFile.
+    ///
+    /// Here is a small table describing how threads should respond to return values:
+    ///   - `Some(Some(index))`: Use the index to proceed with the eviction.
+    ///   - `Some(None)`: The chunk is being evicted by another thread, proceed.
+    ///   - `None`: This chunk should not be evicted, try another.
+    pub fn begin_evict(&self) -> Option<Option<Index<'id>>> {
         use self::ImmutableChunkState::*;
 
-        let mut lock = self.state.lock();
+        self.state.try_lock().and_then(|mut state| {
+            match mem::replace(&mut *state, Evicted) {
+                // We won the race to evict!
+                Stable(index) => Some(Some(index)),
 
-        if let Stable(index) = mem::replace(&mut *lock, Evicted) {
-            Some(index)
-        } else {
-            None
-        }
+                // We should not evict Reserved chunks.
+                Reserved => {
+                    *state = Reserved;
+                    None
+                },
+
+                // Already evicted.
+                Evicted => Some(None),
+            }
+        })
     }
 }
 

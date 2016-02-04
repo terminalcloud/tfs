@@ -1,14 +1,9 @@
-use rwlock2::RwLock;
+use rwlock2::Mutex;
 use slab::Slab;
+use variance::InvariantLifetime;
 
-use std::collections::HashMap;
 use std::fs::File;
-use std::cell::Cell;
-use std::marker::PhantomData;
-use std::sync::{Mutex, Condvar, MutexGuard};
 use std::io;
-
-use {Version, FileMetadata};
 
 pub const BLOCK_SIZE: usize = 2048;
 
@@ -16,12 +11,6 @@ pub struct IndexedSparseFile<'id> {
     file: File,
     allocator: IndexAllocator<'id>
 }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct Id<'id>(PhantomData<Cell<&'id ()>>);
-
-unsafe impl<'id> Send for Id<'id> {}
-unsafe impl<'id> Sync for Id<'id> {}
 
 /// An Index, representing a capability to control a block in an IndexedSparseFile.
 ///
@@ -35,14 +24,14 @@ unsafe impl<'id> Sync for Id<'id> {}
 #[derive(Debug, Hash, PartialEq, Eq)]
 #[must_use]
 pub struct Index<'id> {
-    id: Id<'id>,
+    id: InvariantLifetime<'id>,
     index: Frozen<usize>
 }
 
 impl<'id> Index<'id> {
-    pub fn unsafe_new(index: usize) -> Index<'id> {
+    pub fn unchecked_new(index: usize) -> Index<'id> {
         Index {
-            id: Id(PhantomData),
+            id: InvariantLifetime::new(),
             index: Frozen::new(index)
         }
     }
@@ -61,6 +50,12 @@ impl<T> AsRef<T> for Frozen<T> {
 
 impl<T> Frozen<T> {
     pub fn new(val: T) -> Self { Frozen(val) }
+}
+
+impl<'id> Into<IndexAllocator<'id>> for usize {
+    fn into(self) -> IndexAllocator<'id> {
+        IndexAllocator::new(self)
+    }
 }
 
 impl<'id> IndexedSparseFile<'id> {
@@ -117,23 +112,21 @@ impl<'id> IndexedSparseFile<'id> {
 }
 
 pub struct IndexAllocator<'id> {
-    // Marks the 'id lifetime as invariant, so we can use it to tie Indexes to
-    // their allocator.
-    id: Id<'id>,
+    id: InvariantLifetime<'id>,
     inner: Mutex<Slab<(), usize>>
 }
 
 impl<'id> IndexAllocator<'id> {
     fn new(size: usize) -> IndexAllocator<'id> {
         IndexAllocator {
-            id: Id(PhantomData),
+            id: InvariantLifetime::new(),
             inner: Mutex::new(Slab::new(size))
         }
     }
 
     fn allocate(&self) -> Index<'id> {
         let index = self.inner.lock().unwrap().insert(()).unwrap();
-        Index::unsafe_new(index)
+        Index::unchecked_new(index)
     }
 
     fn deallocate(&self, index: Index<'id>) {
@@ -205,9 +198,7 @@ fn cvt(err: i64) -> io::Result<usize> {
 mod test {
     use tempfile::tempfile;
 
-    use sparse::{SparseFileExt, IndexedSparseFile, BLOCK_SIZE,
-                 IndexAllocator, Index};
-    use Version;
+    use sparse::{SparseFileExt, IndexedSparseFile, BLOCK_SIZE};
 
     #[test]
     fn test_sparse_file_ext() {
@@ -244,8 +235,7 @@ mod test {
 
         use util::test::gen_random_block;
 
-        let mut sparse_file = IndexedSparseFile::new(tempfile().unwrap(),
-                                                     IndexAllocator::new(MAX_CHUNKS));
+        let sparse_file = IndexedSparseFile::new(tempfile().unwrap(), MAX_CHUNKS);
         let zeroes: &[u8] = &[0; BLOCK_SIZE];
 
         // Run the test for several sets of blocks.

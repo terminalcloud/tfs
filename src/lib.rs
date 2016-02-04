@@ -9,6 +9,7 @@ extern crate crossbeam;
 extern crate scoped_pool;
 extern crate slab;
 extern crate vec_map;
+extern crate variance;
 
 #[macro_use]
 extern crate log;
@@ -17,9 +18,7 @@ extern crate log;
 extern crate tempfile;
 
 use uuid::Uuid;
-
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::borrow::Cow;
 
 pub use error::{Error, Result};
 
@@ -49,13 +48,7 @@ impl ContentId {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct VolumeName<'a>(Cow<'a, str>);
-
-impl<'a> VolumeName<'a> {
-    pub fn new<I: Into<Cow<'a, str>>>(from: I) -> Self {
-        VolumeName(from.into())
-    }
-}
+pub struct VolumeName(String);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct VolumeMetadata {
@@ -87,7 +80,7 @@ pub trait Cache: Send + Sync {
 }
 
 pub trait Storage: Cache {
-    fn set_metadata(&self, volume: VolumeName, metadata: VolumeMetadata) -> ::Result<()>;
+    fn set_metadata(&self, volume: &VolumeName, metadata: VolumeMetadata) -> ::Result<()>;
     fn get_metadata(&self, volume: &VolumeName) -> ::Result<VolumeMetadata>;
 
     fn create(&self, id: ContentId, data: &[u8]) -> ::Result<()>;

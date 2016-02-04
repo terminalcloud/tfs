@@ -1,7 +1,7 @@
 use {Storage, Cache, VolumeName, VolumeMetadata, ContentId};
 
 impl Storage for Box<Storage> {
-    fn set_metadata(&self, volume: VolumeName, metadata: VolumeMetadata) -> ::Result<()> {
+    fn set_metadata(&self, volume: &VolumeName, metadata: VolumeMetadata) -> ::Result<()> {
         (**self).set_metadata(volume, metadata)
     }
 
