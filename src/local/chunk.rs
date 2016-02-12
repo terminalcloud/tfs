@@ -1,8 +1,8 @@
-use rwlock2::{RwLock, RwLockWriteGuard};
+use shared_mutex::{SharedMutex, SharedMutexReadGuard, MappedSharedMutexReadGuard};
+use shared_mutex::monitor::{Monitor, MonitorWriteGuard};
 
 use std::mem;
 
-use signal::{Signal, SignalGuard};
 use sparse::Index;
 use {ContentId, Version};
 
@@ -25,13 +25,15 @@ impl<'id> Chunk<'id> {
     ///
     /// The lock should only be released after the new ImmutableChunk is in the
     /// content id map in the Stable state.
-    pub fn freeze<'chunk>(this: &'chunk RwLock<Self>) -> Option<FreezeGuard<'chunk, 'id>> {
+    pub fn freeze<'chunk>(this: &'chunk Monitor<Self>) -> Option<FreezeGuard<'chunk, 'id>> {
         loop {
             { // Wait for the chunk to enter into a freezable state.
                 let read = this.read().unwrap();
-                match *read {
-                    // Abort, the chunk is already immutable.
+                match **read {
+                    // Abort, the chunk is already immutable or another thread
+                    // is currently
                     Chunk::Immutable(_) => return None,
+
                     Chunk::Mutable(ref m) => m.wait_for_freeze(),
                 };
             } // Since we now release the read lock, we may have to wait again.
@@ -41,22 +43,24 @@ impl<'id> Chunk<'id> {
 
             // Replace the existing chunk with a sentinel so we can move out of it.
             let sentinel = Chunk::Immutable(ContentId::null());
-            let current = mem::replace(&mut *write, sentinel);
+            let current = mem::replace(&mut **write, sentinel);
 
             match current {
                 c @ Chunk::Immutable(_) => {
                     // Write back over the sentinel and complete, another thread
                     // beat us to the punch.
-                    *write = c;
+                    **write = c;
                     return None
                 },
 
                 Chunk::Mutable(m) => {
-                    match m.state.into_inner() {
+                    let m_state: SharedMutex<_> = m.state.into();
+
+                    match m_state.into_inner().unwrap() {
                         // Success! We can now freeze.
                         (index, MutableChunkState::Stable(id)) => {
                             // Set ourselves to an immutable chunk.
-                            *write = Chunk::Immutable(id);
+                            **write = Chunk::Immutable(id);
 
                             // Return a guard over this chunk, which should be held
                             // until the new ImmutableChunk is included in the content id
@@ -67,10 +71,12 @@ impl<'id> Chunk<'id> {
                                 id: id
                             })
                         },
+
+                        // A writing thread interrupted us, so we must retry.
                         state => {
-                            *write = Chunk::Mutable(MutableChunk {
+                            **write = Chunk::Mutable(MutableChunk {
                                 version: m.version,
-                                state: Signal::new(state)
+                                state: Monitor::new(state)
                             });
                         }
                     }
@@ -90,7 +96,7 @@ impl<'id> Chunk<'id> {
 /// An exclusive guard over a chunk held while creating a new
 /// ImmutableChunk entry for it when freezing.
 pub struct FreezeGuard<'chunk, 'id: 'chunk> {
-    guard: RwLockWriteGuard<'chunk, Chunk<'id>>,
+    guard: MonitorWriteGuard<'chunk, Chunk<'id>>,
     index: Option<Index<'id>>,
     id: ContentId
 }
@@ -120,7 +126,7 @@ impl<'chunk, 'id> FreezeGuard<'chunk, 'id> {
 /// was requested, and can cancel the flush if it has.
 pub struct MutableChunk<'id> {
     version: Version,
-    state: Signal<(Index<'id>, MutableChunkState)>
+    state: Monitor<(Index<'id>, MutableChunkState)>
 }
 
 impl<'id> MutableChunk<'id> {
@@ -132,31 +138,34 @@ impl<'id> MutableChunk<'id> {
     pub fn new(index: Index<'id>) -> Self {
         MutableChunk {
             version: Version::new(0),
-            state: Signal::new((index, MutableChunkState::Dirty))
+            state: Monitor::new((index, MutableChunkState::Dirty))
         }
     }
 
     pub fn version(&self) -> &Version { &self.version }
 
-    pub fn lock(&self) -> SignalGuard<(Index<'id>, MutableChunkState)> {
-        self.state.lock()
+    pub fn lock(&self) -> MonitorWriteGuard<(Index<'id>, MutableChunkState)> {
+        self.state.write().unwrap()
     }
 
     /// Wait for the chunk to become Stable as part of a snapshot.
-    ///
-    ///
-    pub fn wait_for_freeze(&self) -> SignalGuard<(Index<'id>, MutableChunkState)> {
-        let mut lock = self.state.lock();
+    pub fn wait_for_freeze(&self) -> MappedSharedMutexReadGuard<(Index<'id>, MutableChunkState)> {
+        let mut lock: SharedMutexReadGuard<_> = self.state.read().unwrap().into();
 
         loop {
-            match lock.filter_map(|state| {
+            match lock.into_mapped().result_map(|state| {
                 match *state {
                     (_, MutableChunkState::Dirty) => Err(()),
-                    ref mut state => Ok(state)
+                    ref state => Ok(state)
                 }
             }) {
+                // Stable
                 Ok(lock) => return lock,
-                Err((l, _)) => lock = l.wait()
+
+                // Dirty
+                Err((l, _)) =>
+                    lock = l.recover(&self.state.as_ref()).unwrap()
+                        .wait_for_read(self.state.cond()).unwrap()
             }
         }
     }
@@ -183,14 +192,14 @@ pub enum MutableChunkState {
 
 /// The in-memory state associated with an immutable chunk.
 pub struct ImmutableChunk<'id> {
-    state: Signal<ImmutableChunkState<'id>>
+    state: Monitor<ImmutableChunkState<'id>>
 }
 
 impl<'id> ImmutableChunk<'id> {
     /// Create a new ImmutableChunk, beginning in the Reserved state.
     pub fn new() -> ImmutableChunk<'id> {
         ImmutableChunk {
-            state: Signal::new(ImmutableChunkState::Reserved)
+            state: Monitor::new(ImmutableChunkState::Reserved)
         }
     }
 
@@ -199,7 +208,7 @@ impl<'id> ImmutableChunk<'id> {
     /// Used to transition an Index from mutable to immutable.
     pub fn from_mutable(index: Index<'id>) -> ImmutableChunk<'id> {
         ImmutableChunk {
-            state: Signal::new(ImmutableChunkState::Stable(index))
+            state: Monitor::new(ImmutableChunkState::Stable(index))
         }
     }
 
@@ -212,10 +221,10 @@ impl<'id> ImmutableChunk<'id> {
     pub fn complete_fill(&self, index: Index<'id>) {
         use self::ImmutableChunkState::*;
 
-        let mut lock = self.state.lock();
+        let mut lock = self.state.write().unwrap();
 
-        match *lock {
-            Reserved => *lock = Stable(index),
+        match **lock {
+            Reserved => **lock = Stable(index),
             Stable(_) => panic!("Logic error - complete_fill called on Stable immutable chunk!"),
             Evicted => panic!("Logic error - complete_fill called on Evicted immutable chunk!")
         };
@@ -225,20 +234,27 @@ impl<'id> ImmutableChunk<'id> {
     ///
     /// Returns a lock on the Index associated with this chunk, which allows
     /// reading from the containing IndexedSparseFile.
-    pub fn wait_for_read(&self) -> Option<SignalGuard<Index<'id>>> {
-        let mut lock = self.state.lock();
+    pub fn wait_for_read(&self) -> Option<MappedSharedMutexReadGuard<Index<'id>>> {
+        let mut lock: SharedMutexReadGuard<_> = self.state.read().unwrap().into();
 
         loop {
-            match lock.filter_map(|state| {
+            match lock.into_mapped().result_map(|state| {
                 match *state {
-                    ImmutableChunkState::Stable(ref mut index) => Ok(index),
+                    ImmutableChunkState::Stable(ref index) => Ok(index),
                     ImmutableChunkState::Reserved => Err(true),
                     ImmutableChunkState::Evicted => Err(false)
                 }
             }) {
+                // Stable
                 Ok(lock) => return Some(lock),
-                Err((l, true)) => lock = l.wait(),
-                Err((_, false)) => return None
+
+                // Evicted
+                Err((_, false)) => return None,
+
+                // Reserved
+                Err((l, true)) =>
+                    lock = l.recover(&self.state.as_ref()).unwrap()
+                        .wait_for_read(self.state.cond()).unwrap()
             }
         }
     }
@@ -256,7 +272,8 @@ impl<'id> ImmutableChunk<'id> {
     pub fn begin_evict(&self) -> Option<Option<Index<'id>>> {
         use self::ImmutableChunkState::*;
 
-        self.state.try_lock().and_then(|mut state| {
+        let state: &SharedMutex<_> = self.state.as_ref();
+        state.try_write().ok().and_then(|mut state| {
             match mem::replace(&mut *state, Evicted) {
                 // We won the race to evict!
                 Stable(index) => Some(Some(index)),

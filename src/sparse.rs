@@ -1,7 +1,7 @@
-use rwlock2::Mutex;
 use slab::Slab;
 use variance::InvariantLifetime;
 
+use std::sync::Mutex;
 use std::fs::File;
 use std::io;
 

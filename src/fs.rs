@@ -68,7 +68,7 @@ impl<'id> Fs<'id> {
                         res.or_else(|_| cache.read(id, read_buffer))
                     }).and_then(|_| {
                         // Write back the data we got to our local fs.
-                        self.local.try_write_immutable_chunk(id, read_buffer)
+                        self.local.write_immutable(id, read_buffer)
                     }).and_then(|_| {
                         Ok(try!(buffer.write(read_buffer).map(|_| ())))
                     })
@@ -78,7 +78,8 @@ impl<'id> Fs<'id> {
 
     pub fn write(&self, volume: &VolumeId, block: BlockIndex,
                  offset: usize, data: &[u8]) -> ::Result<()> {
-        unimplemented!()
+        // Write to the local fs, which will queue flush and sync actions.
+        self.local.write_mutable(volume, block, offset, data)
     }
 
     /// Snapshot a local volume under a new name.

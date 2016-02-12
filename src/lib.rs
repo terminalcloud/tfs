@@ -1,10 +1,13 @@
 //! Lazy, peer-to-peer immutable object store.
 
+// FIXME: REMOVE THIS!!!!!
+#![allow(dead_code, unused_variables)]
+
 extern crate rand;
 extern crate uuid;
 extern crate libc;
 extern crate terminal_linked_hash_map;
-extern crate rwlock2;
+extern crate shared_mutex;
 extern crate crossbeam;
 extern crate scoped_pool;
 extern crate slab;
@@ -32,7 +35,6 @@ pub mod error;
 mod local;
 mod impls;
 mod util;
-mod signal;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct BlockIndex(usize);

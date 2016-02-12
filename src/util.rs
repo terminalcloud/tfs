@@ -1,4 +1,4 @@
-use rwlock2::RwLock;
+use std::sync::RwLock;
 
 pub trait RwLockExt<T> {
     /// An efficient combinator for conditonally applying a write action.

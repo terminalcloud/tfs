@@ -1,4 +1,4 @@
-use rwlock2::{RwLock, Mutex, RwLockReadGuard, MutexGuard};
+use shared_mutex::monitor::Monitor;
 use crossbeam::sync::MsQueue;
 use terminal_linked_hash_map::LinkedHashMap;
 use scoped_pool::Scope;
@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use std::fs::OpenOptions;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock, Mutex, MutexGuard};
 use std::path::PathBuf;
 
 use local::flush::{FlushMessage, FlushPool};
@@ -46,17 +46,6 @@ pub struct Options {
 pub enum ReadResult {
     Reserved(ContentId),
     Complete
-}
-
-struct ChunkGuard<'a: 'b, 'b, 'id: 'a> {
-    volume: RwLockReadGuard<'a, Volume<'id>>,
-    block: RwLockReadGuard<'b, Chunk<'id>>
-}
-
-impl<'a, 'b, 'id> ::std::ops::Deref for ChunkGuard<'a, 'b, 'id> {
-    type Target = Chunk<'id>;
-
-    fn deref(&self) -> &Chunk<'id> { &self.block }
 }
 
 impl<'id> LocalFs<'id> {
@@ -99,7 +88,7 @@ impl<'id> LocalFs<'id> {
     }
 
     pub fn version(&self, volume: &VolumeId, block: BlockIndex) -> Option<usize> {
-        self.on_chunk(volume, block, Chunk::version).and_then(|v| v)
+        self.on_chunk(volume, block, |c| c.read().unwrap().version()).and_then(|v| v)
     }
 
     pub fn init<'fs>(&self, fs: &'fs Fs<'id>, scope: &Scope<'fs>) -> ::Result<()> {
@@ -112,7 +101,7 @@ impl<'id> LocalFs<'id> {
 
     pub fn read(&self, volume: &VolumeId, block: BlockIndex, offset: usize, buffer: &mut [u8]) -> ::Result<ReadResult> {
         let id = try!(self.on_chunk(volume, block, |chunk| {
-            match *chunk {
+            match **chunk.read().unwrap() {
                 // If it's an immutable chunk, extract the id for later use.
                 Chunk::Immutable(id) => {
                     Ok(Some(id))
@@ -160,7 +149,7 @@ impl<'id> LocalFs<'id> {
         }
     }
 
-    pub fn try_write_immutable_chunk(&self, id: ContentId, data: &[u8]) -> ::Result<()> {
+    pub fn write_immutable(&self, id: ContentId, data: &[u8]) -> ::Result<()> {
         let chunk = self.chunks.lock().unwrap().get_refresh(&id).map(|c| c.clone())
             .expect("Logic error - chunk evicted in the Reserved state!");
 
@@ -172,8 +161,12 @@ impl<'id> LocalFs<'id> {
         Ok(())
     }
 
-    pub fn try_write_mutable_chunk(&self, volume: &VolumeId, block: BlockIndex,
-                                   data: &[u8]) -> ::Result<()> {
+    pub fn write_mutable(&self, volume: &VolumeId, block: BlockIndex,
+                         offset: usize, data: &[u8]) -> ::Result<()> {
+        // Two major cases:
+        //   - mutable chunk already present, just write to it and mark Dirty
+        //   - block is currently an immutable chunk
+
         // // Write locally:
         // //   - transactionally/atomically:
         // //   - bump the version
@@ -213,7 +206,7 @@ impl<'id> LocalFs<'id> {
     }
 
     fn on_chunk<F, R>(&self, volume: &VolumeId, block: BlockIndex, cb: F) -> Option<R>
-    where F: FnOnce(&Chunk<'id>) -> R {
+    where F: FnOnce(&Monitor<Chunk<'id>>) -> R {
         self.volumes.read().unwrap().get(volume).and_then(|volume| {
             volume.read().unwrap().blocks.get(&block).map(cb)
         })
@@ -230,20 +223,20 @@ impl<'id> LocalFs<'id> {
                     Some(Some(index)) => {
                         return self.file.deallocate(index)
                     },
+
+                    // Another thread is evicting the block.
                     Some(None) => return Ok(()),
-                    None => {
-                        // This chunk is busy, try another.
-                        chunks.insert(id, candidate);
-                    }
+
+                    // This chunk is busy, try another.
+                    None => { chunks.insert(id, candidate); }
                 }
             }
         } else { Ok(()) }
     }
-
 }
 
 struct Volume<'id> {
-    blocks: HashMap<BlockIndex, Chunk<'id>>,
+    blocks: HashMap<BlockIndex, Monitor<Chunk<'id>>>,
     metadata: VolumeMetadata,
     name: VolumeName
 }
