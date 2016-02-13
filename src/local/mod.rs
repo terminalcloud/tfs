@@ -117,35 +117,40 @@ impl<'id> LocalFs<'id> {
         }).ok_or(::Error::NotFound).and_then(|x| x));
 
         if let Some(id) = id {
-            // Immutable chunk case.
-            //
-            // We might have to retry our read.
-            loop {
-                let chunk = self.chunks.lock().unwrap().get_refresh(&id).map(|c| c.clone());
-
-                if let Some(chunk) = chunk {
-                    if let Some(index) = chunk.wait_for_read() {
-                        // Succesfully got a stable chunk with an index we can read from.
-                        try!(self.file.read(&index, offset, buffer));
-                        return Ok(ReadResult::Complete);
-                    } // Else the chunk was evicted, so retry.
-                } else {
-                    // We are the reserving thread!
-                    let mut chunks = self.chunks.lock().unwrap();
-                    if chunks.contains_key(&id) {
-                        // Another thread beat us to reserving! Retry.
-                        continue
-                    } else {
-                        // We need to create a new chunk.
-                        try!(self.evict_if_needed(&mut chunks));
-                        chunks.insert(id, Arc::new(ImmutableChunk::new()));
-                        return Ok(ReadResult::Reserved(id));
-                    }
-                }
-            }
+            self.read_immutable(id, offset, buffer)
         } else {
             // Mutable chunk case.
             Ok(ReadResult::Complete)
+        }
+    }
+
+    // Read the data associated with this content id.
+    //
+    // Can return ReadResult::Reserved if the data is not present.
+    fn read_immutable(&self, id: ContentId, offset: usize, buffer: &mut [u8]) -> ::Result<ReadResult> {
+        // We may have to retry
+        loop {
+            let chunk = self.chunks.lock().unwrap().get_refresh(&id).map(|c| c.clone());
+
+            if let Some(chunk) = chunk {
+                if let Some(index) = chunk.wait_for_read() {
+                    // Succesfully got a stable chunk with an index we can read from.
+                    try!(self.file.read(&index, offset, buffer));
+                    return Ok(ReadResult::Complete);
+                } // Else the chunk was evicted, so retry.
+            } else {
+                // We are the reserving thread!
+                let mut chunks = self.chunks.lock().unwrap();
+                if chunks.contains_key(&id) {
+                    // Another thread beat us to reserving! Retry.
+                    continue
+                } else {
+                    // We need to create a new chunk.
+                    try!(self.evict_if_needed(&mut chunks));
+                    chunks.insert(id, Arc::new(ImmutableChunk::new()));
+                    return Ok(ReadResult::Reserved(id));
+                }
+            }
         }
     }
 
