@@ -143,6 +143,14 @@ impl<'id> MutableChunk<'id> {
         }
     }
 
+    /// Create a new MutableChunk from a diry index, in the Dirty state.
+    pub fn dirty(index: Index<'id>) -> Self {
+        MutableChunk {
+            version: Version::new(0),
+            state: Monitor::new(MutableChunkState::Dirty(index))
+        }
+    }
+
     pub fn version(&self) -> &Version { &self.version }
 
     pub fn fill(&self, index: Index<'id>) -> usize {

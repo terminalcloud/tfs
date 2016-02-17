@@ -74,7 +74,7 @@ impl<'id> LocalFs<'id> {
     pub fn create(&self, volume: VolumeName,
                   metadata: VolumeMetadata) -> ::Result<VolumeId> {
         // If there is no id for this volume generate one and keep track of it.
-        self.names.if_then(|names| names.contains_key(&volume),
+        self.names.if_then(|names| !names.contains_key(&volume),
                            |names| names.insert(volume.clone(),
                                                 VolumeId(Uuid::new_v4())));
 
@@ -95,8 +95,8 @@ impl<'id> LocalFs<'id> {
     pub fn init<'fs>(&self, fs: &'fs Fs<'id>, scope: &Scope<'fs>) -> ::Result<()> {
         // TODO: Make size of pool configurable.
         // TODO: Initiate the sync pool too.
-        let flush_pool = FlushPool::new(fs);
-        flush_pool.run(12, scope);
+        // let flush_pool = FlushPool::new(fs);
+        // flush_pool.run(12, scope);
         Ok(())
     }
 
@@ -197,10 +197,24 @@ impl<'id> LocalFs<'id> {
 
             // Currently immutable case.
             if let Some(id) = id {
-                // Set the chunk to mutable and reserved
-                **chunk_guard = Chunk::Mutable(MutableChunk::new(id));
+                // If the block is empty, just write and go.
+                if id == ContentId::null() {
+                    // Get an empty index and write our portion of the data.
+                    let mut index = self.file.allocate();
+                    try!(self.file.write(&mut index, offset, data));
 
-                Ok(Some(id))
+                    // TODO: Queue Sync/Flush actions.
+                    let mutable = MutableChunk::dirty(index);
+                    let _version = mutable.version().increment();
+                    **chunk_guard = Chunk::Mutable(mutable);
+
+                    Ok(None)
+                } else {
+                    // Set the chunk to mutable and reserved
+                    **chunk_guard = Chunk::Mutable(MutableChunk::new(id));
+
+                    Ok(Some(id))
+                }
             // Already mutable case.
             } else {
                 Ok(None)
