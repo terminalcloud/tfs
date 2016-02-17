@@ -323,8 +323,12 @@ struct Volume<'id> {
 
 impl<'id> Volume<'id> {
     fn new(name: VolumeName, metadata: VolumeMetadata) -> Self {
+        let blocks = (0..metadata.size).map(|block_index| {
+            (BlockIndex(block_index), Monitor::new(Chunk::Immutable(ContentId::null())))
+        }).collect();
+
         Volume {
-            blocks: HashMap::new(),
+            blocks: blocks,
             metadata: metadata,
             name: name
         }
