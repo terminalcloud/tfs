@@ -34,7 +34,7 @@ pub mod test {
 
     /// Generate a random block of data of the given size.
     pub fn gen_random_block(block_size: usize) -> (ContentId, Vec<u8>) {
-        let data = vec![::rand::random::<u8>(); block_size];
+        let data = (0..block_size).map(|_| ::rand::random::<u8>()).collect::<Vec<_>>();
         let id = ContentId::hash(&data);
 
         (id, data)
