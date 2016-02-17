@@ -15,6 +15,7 @@ slab = "0.1"
 log = "0.3"
 vec_map = "0.4"
 variance = "0.1"
+tiny-keccak = "1"
 
 [dev-dependencies]
 tempfile = "2.0"

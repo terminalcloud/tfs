@@ -30,14 +30,14 @@ impl<T> RwLockExt<T> for RwLock<T> {
 }
 
 pub mod test {
-    /// Generate a random block of data of the given size.
-    pub fn gen_random_block(block_size: usize) -> Vec<u8> {
-        vec![::rand::random::<u8>(); block_size]
-    }
+    use {ContentId};
 
-    /// Generate a single random object with a random versioned history.
-    pub fn gen_random_object(block_size: usize, num_versions: usize) -> Vec<Vec<u8>> {
-        vec![gen_random_block(block_size); num_versions]
+    /// Generate a random block of data of the given size.
+    pub fn gen_random_block(block_size: usize) -> (ContentId, Vec<u8>) {
+        let data = vec![::rand::random::<u8>(); block_size];
+        let id = ContentId::hash(&data);
+
+        (id, data)
     }
 }
 

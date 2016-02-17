@@ -1,14 +1,11 @@
-use scoped_threadpool::Pool;
-
-use uuid::Uuid;
+use scoped_pool::Pool;
 
 use std::collections::HashMap;
 use std::sync::RwLock;
 use std::io::Write;
-use std::mem;
 
-use util::test::gen_random_objects;
-use {Storage, Cache, ChunkDescriptor, Version, FileDescriptor, FileMetadata, Chunk};
+use util::test::gen_random_block;
+use {Storage, Cache, ContentId, VolumeMetadata, VolumeName};
 
 pub struct MockStorage {
     inner: RwLock<InnerMockStorage>
@@ -16,22 +13,8 @@ pub struct MockStorage {
 
 #[derive(Default, Clone, Debug)]
 struct InnerMockStorage {
-    storage: HashMap<FileDescriptor, MockFile>
-}
-
-#[derive(Debug, Default, Clone)]
-struct MockFile {
-    data: HashMap<Chunk, HashMap<Option<usize>, Vec<u8>>>,
-    size: usize
-}
-
-impl From<FileMetadata> for MockFile {
-    fn from(metadata: FileMetadata) -> MockFile {
-        MockFile {
-            data: HashMap::with_capacity(metadata.size),
-            size: metadata.size
-        }
-    }
+    volumes: HashMap<VolumeName, VolumeMetadata>,
+    chunks: HashMap<ContentId, Vec<u8>>
 }
 
 impl MockStorage {
@@ -42,111 +25,60 @@ impl MockStorage {
     }
 }
 
-impl Cache for MockStorage {
-    fn read(&self, chunk: &ChunkDescriptor, version: Option<Version>,
-            mut buf: &mut [u8]) -> ::Result<()> {
-        self.inner.read().unwrap().read(chunk, version, buf)
+impl Storage for MockStorage {
+    fn set_metadata(&self, volume: &VolumeName, metadata: VolumeMetadata) -> ::Result<()> {
+        self.inner.write().unwrap().set_metadata(volume, metadata)
+    }
+
+    fn get_metadata(&self, volume: &VolumeName) -> ::Result<VolumeMetadata> {
+        self.inner.read().unwrap().get_metadata(volume)
+    }
+
+    fn create(&self, id: ContentId, data: &[u8]) -> ::Result<()> {
+        self.inner.write().unwrap().create(id, data)
+    }
+
+    fn delete(&self, id: ContentId) -> ::Result<()> {
+        self.inner.write().unwrap().delete(id)
     }
 }
 
-impl Storage for MockStorage {
-    fn set_metadata(&self, file: &FileDescriptor, metadata: FileMetadata) -> ::Result<()> {
-        self.inner.write().unwrap().set_metadata(file, metadata)
-    }
-
-    fn get_metadata(&self, file: &FileDescriptor) -> ::Result<FileMetadata> {
-        self.inner.read().unwrap().get_metadata(file)
-    }
-
-    fn create(&self, chunk: &ChunkDescriptor, version: Option<Version>,
-              data: &[u8]) -> ::Result<()> {
-        self.inner.write().unwrap().create(chunk, version, data)
-    }
-
-    fn promote(&self, chunk: &ChunkDescriptor, version: Version) -> ::Result<()> {
-        self.inner.write().unwrap().promote(chunk, version)
-    }
-
-    fn delete(&self, chunk: &ChunkDescriptor,
-              version: Option<Version>) -> ::Result<()> {
-        self.inner.write().unwrap().delete(chunk, version)
+impl Cache for MockStorage {
+    fn read(&self, id: ContentId, buf: &mut [u8]) -> ::Result<()> {
+        self.inner.read().unwrap().read(id, buf)
     }
 }
 
 impl InnerMockStorage {
-    fn set_metadata(&mut self, file: &FileDescriptor, metadata: FileMetadata) -> ::Result<()> {
-        self.storage.get_mut(&file)
-            .map(|mf| *mf = MockFile::from(metadata));
+    fn set_metadata(&mut self, volume: &VolumeName, metadata: VolumeMetadata) -> ::Result<()> {
+        self.volumes.entry(volume.clone())
+            .or_insert(metadata);
         Ok(())
     }
 
-    fn get_metadata(&self, file: &FileDescriptor) -> ::Result<FileMetadata> {
-        self.storage.get(&file)
-            .ok_or_else(|| ::Error::NotFound)
-            .map(|file| FileMetadata { size: file.size })
+    fn get_metadata(&self, volume: &VolumeName) -> ::Result<VolumeMetadata> {
+        self.volumes.get(&volume).cloned().ok_or(::Error::NotFound)
     }
 
-    fn read(&self, chunk: &ChunkDescriptor, version: Option<Version>,
-            mut buf: &mut [u8]) -> ::Result<()> {
-        self.storage
-            .get(&chunk.file)
-            .and_then(|file| file.data.get(&chunk.chunk))
-            .and_then(|chunk_map| chunk_map.get(&version.as_ref().map(|v| v.load())))
-            .ok_or_else(|| ::Error::NotFound)
-            .and_then(|object| {
-                // TODO: Maybe be more flexible here, or just
-                // always ensure this is the case.
-                assert_eq!(object.len(), buf.len());
-                try!(buf.write(&object));
-                Ok(())
-            })
-    }
+    fn read(&self, id: ContentId, mut buf: &mut [u8]) -> ::Result<()> {
+        let data = try!(self.chunks.get(&id).ok_or(::Error::NotFound));
 
-    fn create(&mut self, chunk: &ChunkDescriptor, version: Option<Version>,
-              data: &[u8]) -> ::Result<()> {
-        self.storage
-            .entry(chunk.file.clone())
-            .or_insert_with(|| MockFile::default())
-            .data.entry(chunk.chunk.clone())
-            .or_insert_with(|| HashMap::new())
-            .entry(version.map(|v| v.load()))
-            .or_insert_with(|| data.to_owned());
-        Ok(())
-    }
-
-    fn promote(&mut self, chunk: &ChunkDescriptor, version: Version) -> ::Result<()> {
-        self.storage
-            .get_mut(&chunk.file)
-            .unwrap_or(&mut MockFile::default())
-            .data.get_mut(&chunk.chunk)
-            .unwrap_or(&mut HashMap::new())
-            .remove(&Some(version.load()))
-            .map(|object| {
-                let empty_map = &mut HashMap::new();
-                let empty_file = &mut MockFile::default();
-                let chunk_map = self.storage
-                    .get_mut(&chunk.file)
-                    .unwrap_or(empty_file)
-                    .data.get_mut(&chunk.chunk)
-                    .unwrap_or(empty_map);
-
-                let mut new_map = HashMap::new();
-                new_map.insert(None, object);
-                mem::replace(chunk_map, new_map);
-            });
+        assert_eq!(data.len(), buf.len());
+        buf.write(data).unwrap();
 
         Ok(())
     }
 
-    fn delete(&mut self, chunk: &ChunkDescriptor,
-              version: Option<Version>) -> ::Result<()> {
-        self.storage
-            .get_mut(&chunk.file)
-            .unwrap_or(&mut MockFile::default())
-            .data.get_mut(&chunk.chunk)
-            .unwrap_or(&mut HashMap::new())
-            .remove(&version.map(|v| v.load()));
+    fn create(&mut self, id: ContentId, data: &[u8]) -> ::Result<()> {
+        self.chunks.entry(id).or_insert_with(|| data.into());
+
         Ok(())
+    }
+
+    fn delete(&mut self, id: ContentId) -> ::Result<()> {
+        self.chunks.remove(&id)
+            .ok_or(::Error::NotFound)
+            .map(|_| ())
     }
 }
 
@@ -189,62 +121,41 @@ impl<S: Storage> StorageFuzzer<S> {
         // The size of each chunk.
         let chunk_size = magnitude * 100;
 
-        // The number of versions for each chunk.
-        let num_versions = magnitude * 10;
+        // Map of (content id => object)
+        let objects = (0..num_objects)
+            .map(|_| gen_random_block(chunk_size))
+            .collect::<HashMap<_, _>>();
 
-        // Map of (chunk_id => (version => object))
-        // (the version => object map is represented as a Vec)
-        let objects = gen_random_objects(num_objects, chunk_size,
-                                         num_versions);
-        let file = Uuid::new_v4();
-
-        // Ensure metada for non-existent file gives NotFound.
-        self.storage.get_metadata(&FileDescriptor(Uuid::new_v4()))
+        // Ensure metada for non-existent volume gives NotFound.
+        self.storage.get_metadata(&VolumeName("random".to_string()))
             .unwrap_err().assert_not_found();
 
         // Use a thread pool to run the tests.
-        let mut pool = Pool::new(objects.len() as u32);
+        let pool = Pool::new(objects.len());
 
         pool.scoped(|scope| {
-            for (chunk, versions) in objects {
-                let file = file.clone();
-
-                // The test that gets run for each object.
-                scope.execute(move || {
-                    let chunk_descriptor = ChunkDescriptor {
-                        file: FileDescriptor(file.clone()),
-                        chunk: chunk.clone()
-                    };
+             for (id, data) in objects {
+                 // Test for each object
+                 scope.execute(move || {
                     let mut buffer = vec![0; chunk_size];
 
-                    // Write all the versions of the chunk in order.
-                    // After each one, read back the latest version and
-                    // make sure it is there.
-                    for (version, data) in versions.iter().enumerate() {
-                        let v = Some(Version::new(version + 1));
-                        self.storage.create(&chunk_descriptor,
-                                            v.clone(), data).unwrap();
-                        self.storage.read(&chunk_descriptor,
-                                          v.clone(), &mut buffer).unwrap();
-                        assert_eq!(data, &buffer);
-                    }
+                    self.storage.create(id, &data).unwrap();
+                    self.storage.read(id, &mut buffer).unwrap();
 
-                    // Promote the last version.
-                    self.storage.promote(&chunk_descriptor,
-                                         Version::new(versions.len())).unwrap();
-                    self.storage.read(&chunk_descriptor, None, &mut buffer).unwrap();
-                    assert_eq!(&buffer, versions.last().unwrap())
-                });
+                    assert_eq!(data, buffer);
+                 })
             }
         });
 
-        // After all the mutations, set metadata (all chunks should be promoted)
-        self.storage.set_metadata(&FileDescriptor(file.clone()),
-                                  FileMetadata { size: num_objects }).unwrap();
+        pool.shutdown();
+
+        // Check metadata.
+        let name = VolumeName("x".to_string());
+        self.storage.set_metadata(&name, VolumeMetadata { size: 100 }).unwrap();
+
         // Also check the metadata.
-        let metadata = self.storage
-            .get_metadata(&FileDescriptor(file.clone())).unwrap();
-        assert_eq!(metadata.size, num_objects);
+        let metadata = self.storage.get_metadata(&name).unwrap();
+        assert_eq!(metadata.size, 100);
     }
 
     /// Ensure that the underlying Storage behaves equivalently to MockStorage
@@ -261,9 +172,8 @@ impl<S: Storage> StorageFuzzer<S> {
 
 #[cfg(test)]
 mod test {
-    use uuid::Uuid;
     use mock::{MockStorage, StorageFuzzer};
-    use {Storage, Cache, ChunkDescriptor, FileDescriptor, Chunk};
+    use {Storage, Cache, ContentId};
 
     #[test]
     fn fuzz_mock_storage() {
@@ -275,31 +185,27 @@ mod test {
     #[test]
     fn test_mock_storage_create_read() {
         let data = &[1, 2, 3, 4, 5, 6, 7, 8];
+        let id = ContentId::hash(data);
 
         let storage = MockStorage::new();
 
-        let chunk = ChunkDescriptor {
-            file: FileDescriptor(Uuid::new_v4()),
-            chunk: Chunk(::rand::random())
-        };
         let mut buf = vec![0; data.len()];
-        storage.create(&chunk, None, data).unwrap();
-        storage.read(&chunk, None, &mut buf).unwrap();
+        storage.create(id, data).unwrap();
+        storage.read(id, &mut buf).unwrap();
         assert_eq!(&buf, data);
 
-        let chunk = ChunkDescriptor {
-            file: FileDescriptor(Uuid::new_v4()),
-            chunk: Chunk(::rand::random())
-        };
+        let data = &[8, 7, 6, 5, 5, 6, 7, 8];
+        let id = ContentId::hash(data);
+
         let mut buf = vec![0; data.len()];
-        storage.create(&chunk, None, &data[..5]).unwrap();
-        storage.read(&chunk, None, &mut buf[..5]).unwrap();
-        assert_eq!(&buf[..5], &data[..5]);
+        storage.create(id, data).unwrap();
+        storage.read(id, &mut buf).unwrap();
+        assert_eq!(&buf, data);
 
         // Try to overwrite, ensure it doesn't work.
-        storage.create(&chunk, None, data).unwrap();
-        storage.read(&chunk, None, &mut buf[..5]).unwrap();
-        assert_eq!(&buf, &[1, 2, 3, 4, 5, 0, 0, 0]);
+        storage.create(id, &[5, 5, 5, 5, 5, 5, 5, 5]).unwrap();
+        storage.read(id, &mut buf).unwrap();
+        assert_eq!(&buf, data);
     }
 }
 

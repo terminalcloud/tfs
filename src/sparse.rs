@@ -240,7 +240,7 @@ mod test {
 
         // Run the test for several sets of blocks.
         for _ in 0..RUNS {
-            let buffers = vec![gen_random_block(BLOCK_SIZE); BLOCKS_PER_RUN];
+            let buffers = vec![gen_random_block(BLOCK_SIZE).1; BLOCKS_PER_RUN];
 
             let mut indexes = buffers.iter()
                 .map(|_| sparse_file.allocate()).collect::<Vec<_>>();

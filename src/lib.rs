@@ -13,6 +13,7 @@ extern crate scoped_pool;
 extern crate slab;
 extern crate vec_map;
 extern crate variance;
+extern crate tiny_keccak as sha;
 
 #[macro_use]
 extern crate log;
@@ -29,7 +30,7 @@ pub mod fs;
 pub mod s3;
 pub mod p2p;
 pub mod sparse;
-// pub mod mock;
+pub mod mock;
 pub mod error;
 
 mod local;
@@ -47,6 +48,16 @@ pub struct ContentId([u8; 32]);
 
 impl ContentId {
     pub fn null() -> Self { ContentId([0; 32]) }
+
+    pub fn hash(data: &[u8]) -> ContentId {
+        let mut hasher = sha::Keccak::new_sha3_256();
+        hasher.update(&data);
+
+        let mut hash = [0; 32];
+        hasher.finalize(&mut hash);
+
+        ContentId(hash)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -70,11 +81,6 @@ impl Clone for Version {
     fn clone(&self) -> Self {
         Version::new(self.load())
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct FileMetadata {
-    pub size: usize
 }
 
 pub trait Cache: Send + Sync {
