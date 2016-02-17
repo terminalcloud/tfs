@@ -3,7 +3,7 @@ use std::iter;
 
 use local::{LocalFs, IoResult};
 use sparse::BLOCK_SIZE;
-use {Storage, Cache, Version, VolumeId, VolumeName, VolumeMetadata, BlockIndex};
+use {Storage, Cache, VolumeId, VolumeName, VolumeMetadata, BlockIndex};
 
 pub struct Fs<'id> {
     storage: Box<Storage>,
@@ -112,6 +112,11 @@ impl<'id> Fs<'id> {
                     })
             }
         }
+    }
+
+    /// Shut down the Fs.
+    pub fn shutdown(&self) {
+        self.local().shutdown();
     }
 
     /// Snapshot a local volume under a new name.

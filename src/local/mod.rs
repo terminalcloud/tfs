@@ -16,7 +16,7 @@ use local::chunk::{Chunk, MutableChunk, ImmutableChunk};
 use util::RwLockExt;
 use sparse::{IndexedSparseFile, BLOCK_SIZE};
 use fs::Fs;
-use {Storage, Cache, VolumeMetadata, VolumeName, VolumeId, ContentId, BlockIndex};
+use {Storage, Cache, VolumeMetadata, VolumeName, VolumeId, Version, ContentId, BlockIndex};
 
 mod flush;
 mod chunk;
@@ -95,9 +95,12 @@ impl<'id> LocalFs<'id> {
     pub fn init<'fs>(&self, fs: &'fs Fs<'id>, scope: &Scope<'fs>) -> ::Result<()> {
         // TODO: Make size of pool configurable.
         // TODO: Initiate the sync pool too.
-        // let flush_pool = FlushPool::new(fs);
-        // flush_pool.run(12, scope);
+        FlushPool::new(fs).run(12, scope);
         Ok(())
+    }
+
+    pub fn shutdown(&self) {
+        self.flush.push(FlushMessage::Quit);
     }
 
     pub fn read(&self, volume: &VolumeId, block: BlockIndex, offset: usize, buffer: &mut [u8]) -> ::Result<IoResult> {
@@ -280,23 +283,18 @@ impl<'id> LocalFs<'id> {
     }
 
     pub fn snapshot(&self, volume: &VolumeId) -> ::Result<VolumeMetadata> {
-        // let blob = try!(self.get_blob(file));
-        // Blob::freeze(&*blob)
         unimplemented!()
     }
 
     pub fn complete_flush(&self, volume: &VolumeId, block: BlockIndex,
-                          id: ContentId) -> ::Result<()> {
-        // let blob = try!(self.get_blob(&chunk.file));
-        // let blob_guard = blob.read().unwrap();
-
-        // if let Some(rw) = blob_guard.as_read_write() {
-        //     rw.complete_flush(chunk.chunk, version)
-        // } else {
-        //     // The blob has already become read only.
-        //     Ok(())
-        // }
-        unimplemented!()
+                          id: ContentId, version: Version) -> ::Result<()> {
+        self.on_chunk(volume, block, |chunk| {
+            if let Chunk::Mutable(ref mut m) = **chunk.write().unwrap() {
+                m.complete_flush(id, version)
+            } else {
+                Ok(())
+            }
+        }).unwrap_or(Ok(()))
     }
 
     fn on_chunk<F, R>(&self, volume: &VolumeId, block: BlockIndex, cb: F) -> Option<R>

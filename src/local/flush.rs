@@ -58,7 +58,6 @@ impl<'fs, 'id> FlushPool<'fs, 'id> {
     //
     // Includes code for restarting the task under panics.
     fn task(self, scope: &Scope<'fs>) {
-        // Sentinel will restart the task if the thread panics.
         let mut sentinel = Sentinel::new(self, scope);
 
         let local = self.fs.local();
@@ -76,33 +75,33 @@ impl<'fs, 'id> FlushPool<'fs, 'id> {
                     },
 
                     FlushMessage::Flush(volume, block, version) => {
-                        // Schedule this task to be restarted under panics.
+                        // Schedule this task to be restarted under errors.
                         sentinel.activate(FlushMessage::Flush(volume.clone(),
                                                               block,
                                                               version.clone()));
 
-                        // let passed_version = version.load();
-                        // let current_version = local.version(&volume, block);
+                        let passed_version = version.load();
+                        let current_version = local.version(&volume, block);
 
-                        // // Assert the versions are the same at the beginning of our read.
-                        // if current_version != Some(passed_version) { return Ok(true) }
+                        // Assert the versions are the same at the beginning of our read.
+                        if current_version != Some(passed_version) { return Ok(true) }
 
-                        // // Do a speculative read.
-                        // let mut buffer: &mut [u8] = &mut [0; BLOCK_SIZE];
-                        // try!(local.read(&volume, block, Some(version.clone()), buffer));
+                        // Do a speculative read.
+                        let mut buffer: &mut [u8] = &mut [0; BLOCK_SIZE];
+                        try!(local.read(&volume, block, 0, buffer));
 
-                        // // After the read, ensure the version number is still
-                        // // correct. If not, cancel.
-                        // let current_version = local.version(&chunk);
-                        // if current_version != Some(passed_version) { return Ok(true) }
+                        // After the read, ensure the version number is still
+                        // correct. If not, cancel.
+                        let current_version = local.version(&volume, block);
+                        if current_version != Some(passed_version) { return Ok(true) }
 
-                        // let content_id = unimplemented!();
+                        let content_id = ContentId::hash(&buffer);
 
-                        // // Upload the object to storage.
-                        // try!(storage.create(content_id, buffer));
+                        // Upload the object to storage.
+                        try!(storage.create(content_id, buffer));
 
                         // // Complete the flush.
-                        // try!(local.complete_flush(&volume, block, version));
+                        try!(local.complete_flush(&volume, block, content_id, version));
 
                         Ok(true)
                     }

@@ -246,6 +246,34 @@ impl<'id> MutableChunk<'id> {
             }
         }
     }
+
+    /// Complete a flush of this chunk.
+    pub fn complete_flush(&self, id: ContentId, version: Version) -> ::Result<()> {
+        // Do a pessimistic check for a version change since the flush occured.
+        if self.version.load() != version.load() { return Ok(()) }
+
+        // Attempt to complete the flush
+        let mut lock = self.state.write().unwrap();
+
+        // Now that we have the lock check the version again, this time it
+        // can't change.
+        if self.version.load() != version.load() { return Ok(()) }
+
+        let sentinel = MutableChunkState::Reserved(ContentId::null());
+        let state = mem::replace(&mut **lock, sentinel);
+
+        **lock = match state {
+            // We flushed the chunk, set it to stable.
+            MutableChunkState::Dirty(index) => MutableChunkState::Stable(index, id),
+
+            // Already flushed or does not need to be flushed, do nothing.
+            //
+            // NOTE: Maybe we should assert this can't happen.
+            state => state,
+        };
+
+        Ok(())
+    }
 }
 
 /// The states of a MutableChunk

@@ -108,9 +108,13 @@ mod test {
 
     use {VolumeName, VolumeMetadata, BlockIndex};
 
+    // NOTE: Since the FlushPool is currently hard-coded to use 12 threads,
+    // all our thread pools must have AT LEAST 12 threads or we will get
+    // livelock.
+
     #[test]
     fn test_create_write_read() {
-        let pool = Pool::new(4);
+        let pool = Pool::new(16);
         let tempdir = ::tempdir::TempDir::new("tfs-test").unwrap();
 
         let localfs = LocalFs::new(Options {
@@ -127,23 +131,27 @@ mod test {
             let metadata = VolumeMetadata { size: 10 };
             let vol_id = fs.create(&name, metadata).unwrap();
 
-            for i in 0..10 {
-                scope.execute(move || {
-                    let data1 = gen_random_block(50).1;
-                    fs.write(&vol_id, BlockIndex(i), 20, &data1).unwrap();
+            scope.zoom(|scope| {
+                for i in 0..10 {
+                    scope.execute(move || {
+                        let data1 = gen_random_block(50).1;
+                        fs.write(&vol_id, BlockIndex(i), 20, &data1).unwrap();
 
-                    let data2 = gen_random_block(50).1;
-                    fs.write(&vol_id, BlockIndex(i), 100, &data2).unwrap();
+                        let data2 = gen_random_block(50).1;
+                        fs.write(&vol_id, BlockIndex(i), 100, &data2).unwrap();
 
-                    let mut buf: &mut [u8] = &mut [0u8; 50];
-                    fs.read(&vol_id, BlockIndex(i), 20, buf).unwrap();
-                    assert_eq!(&*data1, &*buf);
+                        let mut buf: &mut [u8] = &mut [0u8; 50];
+                        fs.read(&vol_id, BlockIndex(i), 20, buf).unwrap();
+                        assert_eq!(&*data1, &*buf);
 
-                    let mut buf: &mut [u8] = &mut [0u8; 50];
-                    fs.read(&vol_id, BlockIndex(i), 100, buf).unwrap();
-                    assert_eq!(&*data2, &*buf);
-                });
-            }
+                        let mut buf: &mut [u8] = &mut [0u8; 50];
+                        fs.read(&vol_id, BlockIndex(i), 100, buf).unwrap();
+                        assert_eq!(&*data2, &*buf);
+                    });
+                }
+            });
+
+            fs.shutdown();
         });
 
         pool.shutdown();
@@ -151,7 +159,7 @@ mod test {
 
     #[test]
     fn test_multi_volume() {
-        let pool = Pool::new(8);
+        let pool = Pool::new(16);
         let tempdir = ::tempdir::TempDir::new("tfs-test").unwrap();
 
         let localfs = LocalFs::new(Options {
@@ -166,7 +174,7 @@ mod test {
 
             for name in 0..10 {
                 let name = format!("test-volume{}", name);
-                scope.recurse(move |scope| {
+                scope.zoom(move |scope| {
                     let name = VolumeName(name.to_string());
                     let metadata = VolumeMetadata { size: 10 };
                     let vol_id = fs.create(&name, metadata).unwrap();
@@ -188,8 +196,10 @@ mod test {
                             assert_eq!(&*data2, &*buf);
                         });
                     }
-                })
+                });
             }
+
+            fs.shutdown();
         });
 
         pool.shutdown();
