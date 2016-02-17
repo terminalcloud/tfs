@@ -7,13 +7,14 @@ use uuid::Uuid;
 use std::fs::OpenOptions;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock, Mutex, MutexGuard};
+use std::io::Write;
 use std::path::PathBuf;
 
 use local::flush::{FlushMessage, FlushPool};
 use local::chunk::{Chunk, MutableChunk, ImmutableChunk};
 
 use util::RwLockExt;
-use sparse::IndexedSparseFile;
+use sparse::{IndexedSparseFile, BLOCK_SIZE};
 use fs::Fs;
 use {Storage, Cache, VolumeMetadata, VolumeName, VolumeId, ContentId, BlockIndex};
 
@@ -43,7 +44,7 @@ pub struct Options {
     pub size: usize
 }
 
-pub enum ReadResult {
+pub enum IoResult {
     Reserved(ContentId),
     Complete
 }
@@ -99,7 +100,7 @@ impl<'id> LocalFs<'id> {
         Ok(())
     }
 
-    pub fn read(&self, volume: &VolumeId, block: BlockIndex, offset: usize, buffer: &mut [u8]) -> ::Result<ReadResult> {
+    pub fn read(&self, volume: &VolumeId, block: BlockIndex, offset: usize, buffer: &mut [u8]) -> ::Result<IoResult> {
         let id = try!(self.on_chunk(volume, block, |chunk| {
             match **chunk.read().unwrap() {
                 // If it's an immutable chunk, extract the id for later use.
@@ -109,8 +110,8 @@ impl<'id> LocalFs<'id> {
 
                 // If it's a mutable chunk, just do the read and we're done!
                 Chunk::Mutable(ref m) => {
-                    let guard = m.lock();
-                    try!(self.file.read(&guard.0, offset, buffer));
+                    let guard = m.wait_for_read();
+                    try!(self.file.read(&guard, offset, buffer));
                     Ok(None)
                 }
             }
@@ -120,14 +121,14 @@ impl<'id> LocalFs<'id> {
             self.read_immutable(id, offset, buffer)
         } else {
             // Mutable chunk case.
-            Ok(ReadResult::Complete)
+            Ok(IoResult::Complete)
         }
     }
 
     // Read the data associated with this content id.
     //
-    // Can return ReadResult::Reserved if the data is not present.
-    fn read_immutable(&self, id: ContentId, offset: usize, buffer: &mut [u8]) -> ::Result<ReadResult> {
+    // Can return IoResult::Reserved if the data is not present.
+    fn read_immutable(&self, id: ContentId, offset: usize, buffer: &mut [u8]) -> ::Result<IoResult> {
         // We may have to retry
         loop {
             let chunk = self.chunks.lock().unwrap().get_refresh(&id).map(|c| c.clone());
@@ -136,7 +137,7 @@ impl<'id> LocalFs<'id> {
                 if let Some(index) = chunk.wait_for_read() {
                     // Succesfully got a stable chunk with an index we can read from.
                     try!(self.file.read(&index, offset, buffer));
-                    return Ok(ReadResult::Complete);
+                    return Ok(IoResult::Complete);
                 } // Else the chunk was evicted, so retry.
             } else {
                 // We are the reserving thread!
@@ -148,7 +149,7 @@ impl<'id> LocalFs<'id> {
                     // We need to create a new chunk.
                     try!(self.evict_if_needed(&mut chunks));
                     chunks.insert(id, Arc::new(ImmutableChunk::new()));
-                    return Ok(ReadResult::Reserved(id));
+                    return Ok(IoResult::Reserved(id));
                 }
             }
         }
@@ -167,27 +168,101 @@ impl<'id> LocalFs<'id> {
     }
 
     pub fn write_mutable(&self, volume: &VolumeId, block: BlockIndex,
-                         offset: usize, data: &[u8]) -> ::Result<()> {
+                         offset: usize, data: &[u8]) -> ::Result<IoResult> {
         // Two major cases:
         //   - mutable chunk already present, just write to it and mark Dirty
         //   - block is currently an immutable chunk
+        //     - create new reserved MutableChunk
+        //     - throw reserved error, resume at finish_mutable_write after
+        //       read_immutable
 
-        // // Write locally:
-        // //   - transactionally/atomically:
-        // //   - bump the version
+        let id = try!(self.on_chunk(volume, block, |chunk| {
+            let mut chunk_guard = chunk.write().unwrap();
 
-        // // Queue new versioned chunk to be flushed. When done, unpin.
-        // let blob = try!(self.get_blob(&chunk.file));
-        // let mut blob_guard = blob.write().unwrap();
-        // let version = try!(blob_guard.assert_versioned_mut()
-        //     .write(chunk.chunk, data));
+            let id = match **chunk_guard {
+                Chunk::Mutable(ref mut m) => {
+                    // Acquire write guard, execute write.
+                    let mut guard = m.wait_for_write();
+                    try!(self.file.write(&mut guard, offset, data));
 
-        // // Queue the new versioned chunk to be flushed.
-        // self.flush.push(FlushMessage::Flush(chunk.clone(),
-        //                                     Version::new(version)));
+                    // Transition to Dirty, get write version.
+                    // TODO: Queue Sync/Flush actions.
+                    let _version = m.complete_write(guard);
 
-        // Ok(())
-        unimplemented!()
+                    None
+                },
+
+                Chunk::Immutable(id) => Some(id),
+            };
+
+            // Currently immutable case.
+            if let Some(id) = id {
+                // Set the chunk to mutable and reserved
+                **chunk_guard = Chunk::Mutable(MutableChunk::new(id));
+
+                Ok(Some(id))
+            // Already mutable case.
+            } else {
+                Ok(None)
+            }
+        }).ok_or(::Error::NotFound).and_then(|x| x));
+
+        // Just set to reserved case.
+        if let Some(id) = id {
+            // Try to read the data locally.
+            let mut block_data = vec![0; BLOCK_SIZE];
+
+            match try!(self.read_immutable(id, 0, &mut block_data)) {
+                // The data was already available locally.
+                IoResult::Complete => {
+                    // We read the data, and can now complete our write.
+                    try!(self.finish_mutable_write(volume, block,
+                                                   &mut block_data,
+                                                   offset, data));
+                    Ok(IoResult::Complete)
+                },
+
+                // The data is not available locally and must be fetched.
+                IoResult::Reserved(id) => Ok(IoResult::Reserved(id))
+            }
+        // Mutable chunk case, we are done.
+        } else {
+            Ok(IoResult::Complete)
+        }
+    }
+
+    pub fn finish_mutable_write(&self, volume: &VolumeId, block: BlockIndex,
+                                block_data: &mut [u8], offset: usize, data: &[u8]) -> ::Result<()> {
+        assert!(offset < block_data.len(),
+                "offset greater than block size: {:?} > {:?}", offset, block_data.len());
+        assert!(data.len() <= block_data.len() - offset,
+                "requested write larger than block size - offset: {:?} > {:?}",
+                data.len(), block_data.len() - offset);
+
+        // Write data into block_data.
+        (&mut block_data[offset..]).write(data).unwrap();
+
+        // Ready to be written to the chunk.
+        let data = block_data;
+
+        // Write the data to the file.
+        let mut index = self.file.allocate();
+        try!(self.file.write(&mut index, 0, data));
+
+        self.on_chunk(volume, block, |chunk| {
+            match **chunk.write().unwrap() {
+                // Impossible, since snapshot waits for Stable and we are Reserved.
+                Chunk::Immutable(id) =>
+                    panic!("Logic error! Immutable chunk found when finishing mutable write."),
+
+                // It's a mutable chunk, fill it, setting it to Dirty.
+                Chunk::Mutable(ref mut m) => {
+                    // TODO: Queue Sync/Flush actions.
+                    let _version = m.fill(index);
+                    Ok(())
+                }
+            }
+        }).unwrap_or(Err(::Error::NotFound))
     }
 
     pub fn snapshot(&self, volume: &VolumeId) -> ::Result<VolumeMetadata> {

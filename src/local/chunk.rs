@@ -1,4 +1,6 @@
-use shared_mutex::{SharedMutex, SharedMutexReadGuard, MappedSharedMutexReadGuard};
+use shared_mutex::{SharedMutex, SharedMutexReadGuard, SharedMutexWriteGuard,
+                   MappedSharedMutexReadGuard,
+                   MappedSharedMutexWriteGuard};
 use shared_mutex::monitor::{Monitor, MonitorWriteGuard};
 
 use std::mem;
@@ -58,7 +60,7 @@ impl<'id> Chunk<'id> {
 
                     match m_state.into_inner().unwrap() {
                         // Success! We can now freeze.
-                        (index, MutableChunkState::Stable(id)) => {
+                        MutableChunkState::Stable(index, id) => {
                             // Set ourselves to an immutable chunk.
                             **write = Chunk::Immutable(id);
 
@@ -126,37 +128,104 @@ impl<'chunk, 'id> FreezeGuard<'chunk, 'id> {
 /// was requested, and can cancel the flush if it has.
 pub struct MutableChunk<'id> {
     version: Version,
-    state: Monitor<(Index<'id>, MutableChunkState)>
+    state: Monitor<MutableChunkState<'id>>
 }
 
 impl<'id> MutableChunk<'id> {
-    /// Create a new MutableChunk metadata.
+    /// Create a new MutableChunk metadata in the Reserved state.
     ///
-    /// Should be called *after* allocating the Index and writing the requested
-    /// data to it. Must be inserted into the block map *before* queuing a flush
-    /// on this chunk.
-    pub fn new(index: Index<'id>) -> Self {
+    /// Should be called *before* allocating an Index and acquiring the data
+    /// needed for this MutableChunk.
+    pub fn new(id: ContentId) -> Self {
         MutableChunk {
             version: Version::new(0),
-            state: Monitor::new((index, MutableChunkState::Dirty))
+            state: Monitor::new(MutableChunkState::Reserved(id))
         }
     }
 
     pub fn version(&self) -> &Version { &self.version }
 
-    pub fn lock(&self) -> MonitorWriteGuard<(Index<'id>, MutableChunkState)> {
-        self.state.write().unwrap()
+    pub fn fill(&self, index: Index<'id>) -> usize {
+        let mut lock = self.state.write().unwrap();
+
+        // Transition from Reserved => Dirty
+        **lock = match **lock {
+            MutableChunkState::Reserved(_) => MutableChunkState::Dirty(index),
+            ref state @ _ => panic!("Logic error! Wrong state on mutable chunk fill: {:?}", state)
+        };
+
+        // Notify pending writers who are waiting for a transition out of the
+        // Reserved state.
+        self.state.notify_all();
+
+        // Increment the version (always from 0 to 1)
+        self.version.increment()
     }
 
-    /// Wait for the chunk to become Stable as part of a snapshot.
-    pub fn wait_for_freeze(&self) -> MappedSharedMutexReadGuard<(Index<'id>, MutableChunkState)> {
+    pub fn wait_for_write(&self) -> MappedSharedMutexWriteGuard<Index<'id>> {
+        let mut lock: SharedMutexWriteGuard<_> = self.state.write().unwrap().into();
+
+        loop {
+            match lock.into_mapped().result_map(|state| {
+                match *state {
+                    MutableChunkState::Dirty(ref mut index) |
+                        MutableChunkState::Stable(ref mut index, _) => Ok(index),
+                    MutableChunkState::Reserved(_) => Err(())
+                }
+            }) {
+                Ok(lock) => return lock,
+                Err((l, ())) =>
+                    lock = l.recover(&self.state.as_ref()).unwrap()
+                        .wait_for_write(self.state.cond()).unwrap()
+            }
+        }
+    }
+
+    pub fn complete_write(&self, m: MappedSharedMutexWriteGuard<Index<'id>>) -> usize {
+        let mut lock = m.recover(&self.state.as_ref()).unwrap();
+
+        let sentinel = MutableChunkState::Reserved(ContentId::null());
+        let state = mem::replace(&mut *lock, sentinel);
+
+        *lock = match state {
+            state @ MutableChunkState::Dirty(_) => state,
+            MutableChunkState::Stable(index, _) => MutableChunkState::Dirty(index),
+            MutableChunkState::Reserved(_) =>
+                panic!("Logic error! Reserved state observed during complete_write!")
+        };
+
+        self.version().increment()
+    }
+
+    pub fn wait_for_read(&self) -> MappedSharedMutexReadGuard<Index<'id>> {
         let mut lock: SharedMutexReadGuard<_> = self.state.read().unwrap().into();
 
         loop {
             match lock.into_mapped().result_map(|state| {
                 match *state {
-                    (_, MutableChunkState::Dirty) => Err(()),
-                    ref state => Ok(state)
+                    MutableChunkState::Dirty(ref index) |
+                        MutableChunkState::Stable(ref index, _) => Ok(index),
+                    MutableChunkState::Reserved(_) => Err(())
+                }
+            }) {
+                Ok(lock) => return lock,
+                Err((l, ())) =>
+                    lock = l.recover(&self.state.as_ref()).unwrap()
+                        .wait_for_read(self.state.cond()).unwrap()
+            }
+        }
+    }
+
+    /// Wait for the chunk to become Stable as part of a snapshot.
+    pub fn wait_for_freeze(&self) -> MappedSharedMutexReadGuard<MutableChunkState<'id>> {
+        let mut lock: SharedMutexReadGuard<_> = self.state.read().unwrap().into();
+
+        loop {
+            match lock.into_mapped().result_map(|state| {
+                match *state {
+                    MutableChunkState::Dirty(_) => Err(()),
+                    MutableChunkState::Reserved(_) => Err(()),
+                    ref state @ MutableChunkState::Stable(..) => Ok(state)
                 }
             }) {
                 // Stable
@@ -173,9 +242,14 @@ impl<'id> MutableChunk<'id> {
 
 /// The states of a MutableChunk
 ///
-/// A MutableChunk begins with no state, and remains there while the thread
+/// A MutableChunk begins in the Reserved state, and remains there while the thread
 /// creating it writes the initial data in the chunk to a backing IndexedSparseFile,
 /// after which it transitions to the Dirty state.
+///
+/// Threads other than the creating thread observing a Reserved state have two choices:
+/// if they are reading threads, they may attempt to look up an ImmutableChunk with the
+/// given ContentId and read from that; if they are writing threads, they should wait
+/// for a state transition to Dirty or Stable, then execute their write.
 ///
 /// When the flush action associated with the latest write to this chunk completes,
 /// the flushing thread will transition the state to Stable, filling in its ContentId.
@@ -183,11 +257,13 @@ impl<'id> MutableChunk<'id> {
 /// Any write to the chunk should transition the state to Dirty and queue a flush action
 /// for the chunk, so it can eventually transition to Stable.
 ///
-/// Threads observing the chunk in either state may freely read and write the chunk.
+/// Threads observing the chunk in either the Dirty or Stable states may read and
+/// write the chunk.
 #[derive(Debug, PartialEq)]
-pub enum MutableChunkState {
-    Dirty,
-    Stable(ContentId)
+pub enum MutableChunkState<'id> {
+    Reserved(ContentId),
+    Dirty(Index<'id>),
+    Stable(Index<'id>, ContentId)
 }
 
 /// The in-memory state associated with an immutable chunk.
@@ -228,6 +304,9 @@ impl<'id> ImmutableChunk<'id> {
             Stable(_) => panic!("Logic error - complete_fill called on Stable immutable chunk!"),
             Evicted => panic!("Logic error - complete_fill called on Evicted immutable chunk!")
         };
+
+        // Notify pending readers that the data is here.
+        self.state.notify_all();
     }
 
     /// Wait for the chunk to be readable.
