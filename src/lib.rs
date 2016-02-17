@@ -20,6 +20,8 @@ extern crate log;
 
 #[cfg(test)]
 extern crate tempfile;
+#[cfg(test)]
+extern crate tempdir;
 
 use uuid::Uuid;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -93,5 +95,56 @@ pub trait Storage: Cache {
 
     fn create(&self, id: ContentId, data: &[u8]) -> ::Result<()>;
     fn delete(&self, id: ContentId) -> ::Result<()>;
+}
+
+#[cfg(test)]
+mod test {
+    use scoped_pool::Pool;
+
+    use fs::Fs;
+    use local::{Options, LocalFs};
+    use mock::MockStorage;
+    use util::test::gen_random_block;
+
+    use {VolumeName, VolumeMetadata, BlockIndex};
+
+    #[test]
+    fn test_create_write_read() {
+        let pool = Pool::new(2);
+        let tempdir = ::tempdir::TempDir::new("tfs-test").unwrap();
+
+        let localfs = LocalFs::new(Options {
+            mount: tempdir.path().into(),
+            size: 100
+        }).unwrap();
+
+        let fs = &Fs::new(Box::new(MockStorage::new()), Vec::new(), localfs);
+
+        pool.scoped(move |scope| {
+            fs.local().init(fs, scope).unwrap();
+
+            let name = VolumeName("test-volume".to_string());
+            let metadata = VolumeMetadata { size: 10 };
+            let vol_id = fs.create(&name, metadata).unwrap();
+
+            for i in 0..10 {
+                let data1 = gen_random_block(50).1;
+                fs.write(&vol_id, BlockIndex(i), 20, &data1).unwrap();
+
+                let data2 = gen_random_block(50).1;
+                fs.write(&vol_id, BlockIndex(i), 100, &data2).unwrap();
+
+                let mut buf: &mut [u8] = &mut [0u8; 50];
+                fs.read(&vol_id, BlockIndex(i), 20, buf).unwrap();
+                assert_eq!(&*data1, &*buf);
+
+                let mut buf: &mut [u8] = &mut [0u8; 50];
+                fs.read(&vol_id, BlockIndex(i), 100, buf).unwrap();
+                assert_eq!(&*data2, &*buf);
+            }
+        });
+
+        pool.shutdown();
+    }
 }
 
