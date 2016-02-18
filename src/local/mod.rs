@@ -190,8 +190,11 @@ impl<'id> LocalFs<'id> {
                     try!(self.file.write(&mut guard, offset, data));
 
                     // Transition to Dirty, get write version.
-                    // TODO: Queue Sync/Flush actions.
-                    let _version = m.complete_write(guard);
+                    let version = m.complete_write(guard);
+
+                    // TODO: Queue Sync action.
+                    self.flush.push(FlushMessage::Flush(volume.clone(), block,
+                                                        Version::new(version)));
 
                     None
                 },
@@ -207,10 +210,13 @@ impl<'id> LocalFs<'id> {
                     let mut index = self.file.allocate();
                     try!(self.file.write(&mut index, offset, data));
 
-                    // TODO: Queue Sync/Flush actions.
                     let mutable = MutableChunk::dirty(index);
-                    let _version = mutable.version().increment();
+                    let version = mutable.version().increment();
                     **chunk_guard = Chunk::Mutable(mutable);
+
+                    // TODO: Queue Sync action.
+                    self.flush.push(FlushMessage::Flush(volume.clone(), block,
+                                                        Version::new(version)));
 
                     Ok(None)
                 } else {
@@ -275,8 +281,12 @@ impl<'id> LocalFs<'id> {
 
                 // It's a mutable chunk, fill it, setting it to Dirty.
                 Chunk::Mutable(ref mut m) => {
-                    // TODO: Queue Sync/Flush actions.
-                    let _version = m.fill(index);
+                    let version = m.fill(index);
+
+                    // TODO: Queue Sync action.
+                    self.flush.push(FlushMessage::Flush(volume.clone(), block,
+                                                        Version::new(version)));
+
                     Ok(())
                 }
             }
