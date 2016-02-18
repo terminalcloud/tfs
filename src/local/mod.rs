@@ -41,7 +41,9 @@ type ImmutableChunkMap<'id> = LinkedHashMap<ContentId, Arc<ImmutableChunk<'id>>>
 
 pub struct Options {
     pub mount: PathBuf,
-    pub size: usize
+    pub size: usize,
+    pub flush_threads: usize,
+    pub sync_threads: usize
 }
 
 pub enum IoResult {
@@ -93,9 +95,8 @@ impl<'id> LocalFs<'id> {
     }
 
     pub fn init<'fs>(&self, fs: &'fs Fs<'id>, scope: &Scope<'fs>) -> ::Result<()> {
-        // TODO: Make size of pool configurable.
         // TODO: Initiate the sync pool too.
-        FlushPool::new(fs).run(12, scope);
+        FlushPool::new(fs).run(self.config.flush_threads, scope);
         Ok(())
     }
 

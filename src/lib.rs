@@ -108,18 +108,16 @@ mod test {
 
     use {VolumeName, VolumeMetadata, BlockIndex};
 
-    // NOTE: Since the FlushPool is currently hard-coded to use 12 threads,
-    // all our thread pools must have AT LEAST 12 threads or we will get
-    // livelock.
-
     #[test]
     fn test_create_write_read() {
-        let pool = Pool::new(16);
+        let pool = Pool::new(12);
         let tempdir = ::tempdir::TempDir::new("tfs-test").unwrap();
 
         let localfs = LocalFs::new(Options {
             mount: tempdir.path().into(),
-            size: 100
+            size: 100,
+            flush_threads: 4,
+            sync_threads: 4
         }).unwrap();
 
         let fs = &Fs::new(Box::new(MockStorage::new()), Vec::new(), localfs);
@@ -159,12 +157,14 @@ mod test {
 
     #[test]
     fn test_multi_volume() {
-        let pool = Pool::new(16);
+        let pool = Pool::new(12);
         let tempdir = ::tempdir::TempDir::new("tfs-test").unwrap();
 
         let localfs = LocalFs::new(Options {
             mount: tempdir.path().into(),
-            size: 100
+            size: 100,
+            flush_threads: 4,
+            sync_threads: 4
         }).unwrap();
 
         let fs = &Fs::new(Box::new(MockStorage::new()), Vec::new(), localfs);
