@@ -172,10 +172,9 @@ mod test {
         pool.scoped(move |scope| {
             fs.local().init(fs, scope).unwrap();
 
-            for name in 0..10 {
-                let name = format!("test-volume{}", name);
-                scope.zoom(move |scope| {
-                    let name = VolumeName(name.to_string());
+            scope.zoom(move |scope| {
+                for name in 0..10 {
+                    let name = VolumeName(format!("test-volume{}", name));
                     let metadata = VolumeMetadata { size: 10 };
                     let vol_id = fs.create(&name, metadata).unwrap();
 
@@ -196,8 +195,8 @@ mod test {
                             assert_eq!(&*data2, &*buf);
                         });
                     }
-                });
-            }
+                }
+            });
 
             fs.shutdown();
         });
