@@ -1,8 +1,12 @@
-use {Storage, Cache, VolumeName, VolumeMetadata, ContentId};
+use {Storage, Cache, VolumeName, VolumeMetadata, ContentId, Snapshot};
 
 impl Storage for Box<Storage> {
-    fn set_metadata(&self, volume: &VolumeName, metadata: VolumeMetadata) -> ::Result<()> {
-        (**self).set_metadata(volume, metadata)
+    fn snapshot(&self, volume: &VolumeName, snapshot: Snapshot) -> ::Result<()> {
+        (**self).snapshot(volume, snapshot)
+    }
+
+    fn get_snapshot(&self, name: &VolumeName) -> ::Result<Snapshot> {
+        (**self).get_snapshot(name)
     }
 
     fn get_metadata(&self, volume: &VolumeName) -> ::Result<VolumeMetadata> {

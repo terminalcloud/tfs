@@ -5,7 +5,7 @@ use std::sync::RwLock;
 use std::io::Write;
 
 use util::test::gen_random_block;
-use {Storage, Cache, ContentId, VolumeMetadata, VolumeName};
+use {Storage, Cache, ContentId, VolumeMetadata, VolumeName, Snapshot, BlockIndex};
 
 pub struct MockStorage {
     inner: RwLock<InnerMockStorage>
@@ -13,7 +13,7 @@ pub struct MockStorage {
 
 #[derive(Default, Clone, Debug)]
 struct InnerMockStorage {
-    volumes: HashMap<VolumeName, VolumeMetadata>,
+    volumes: HashMap<VolumeName, Snapshot>,
     chunks: HashMap<ContentId, Vec<u8>>
 }
 
@@ -26,8 +26,12 @@ impl MockStorage {
 }
 
 impl Storage for MockStorage {
-    fn set_metadata(&self, volume: &VolumeName, metadata: VolumeMetadata) -> ::Result<()> {
-        self.inner.write().unwrap().set_metadata(volume, metadata)
+    fn snapshot(&self, volume: &VolumeName, snapshot: Snapshot) -> ::Result<()> {
+        self.inner.write().unwrap().snapshot(volume, snapshot)
+    }
+
+    fn get_snapshot(&self, name: &VolumeName) -> ::Result<Snapshot> {
+        self.inner.read().unwrap().get_snapshot(name)
     }
 
     fn get_metadata(&self, volume: &VolumeName) -> ::Result<VolumeMetadata> {
@@ -50,14 +54,25 @@ impl Cache for MockStorage {
 }
 
 impl InnerMockStorage {
-    fn set_metadata(&mut self, volume: &VolumeName, metadata: VolumeMetadata) -> ::Result<()> {
+    fn snapshot(&mut self, volume: &VolumeName, snapshot: Snapshot) -> ::Result<()> {
         self.volumes.entry(volume.clone())
-            .or_insert(metadata);
+            .or_insert(snapshot);
+
         Ok(())
     }
 
+    fn get_snapshot(&self, name: &VolumeName) -> ::Result<Snapshot> {
+        self.volumes.get(name).cloned().ok_or(::Error::NotFound)
+    }
+
+    fn set_metadata(&mut self, volume: &VolumeName, metadata: VolumeMetadata) -> ::Result<()> {
+        self.volumes.get_mut(volume).map(|snap| {
+            snap.metadata = metadata;
+        }).ok_or(::Error::NotFound)
+    }
+
     fn get_metadata(&self, volume: &VolumeName) -> ::Result<VolumeMetadata> {
-        self.volumes.get(&volume).cloned().ok_or(::Error::NotFound)
+        self.volumes.get(&volume).map(|snap| &snap.metadata).cloned().ok_or(::Error::NotFound)
     }
 
     fn read(&self, id: ContentId, mut buf: &mut [u8]) -> ::Result<()> {
@@ -130,11 +145,15 @@ impl<S: Storage> StorageFuzzer<S> {
         self.storage.get_metadata(&VolumeName("random".to_string()))
             .unwrap_err().assert_not_found();
 
+        // Ensure snapshots for non-existent volume gives NotFound.
+        self.storage.get_snapshot(&VolumeName("random".to_string()))
+            .unwrap_err().assert_not_found();
+
         // Use a thread pool to run the tests.
         let pool = Pool::new(objects.len());
 
         pool.scoped(|scope| {
-             for (id, data) in objects {
+             for (id, data) in objects.clone() {
                  // Test for each object
                  scope.execute(move || {
                     let mut buffer = vec![0; chunk_size];
@@ -149,13 +168,20 @@ impl<S: Storage> StorageFuzzer<S> {
 
         pool.shutdown();
 
-        // Check metadata.
-        let name = VolumeName("x".to_string());
-        self.storage.set_metadata(&name, VolumeMetadata { size: 100 }).unwrap();
+        // Create a snapshot referencing only content-ids we previously uploaded.
+        let snapshot = Snapshot {
+            metadata: VolumeMetadata { size: num_objects },
+            blocks: objects.keys().enumerate()
+                .map(|(index, &id)| (BlockIndex(index), id)).collect()
+        };
 
-        // Also check the metadata.
+        // Upload the snapshot.
+        let name = VolumeName("some_volume".to_string());
+        self.storage.snapshot(&name, snapshot.clone()).unwrap();
+
+        // Check we can get the metadata.
         let metadata = self.storage.get_metadata(&name).unwrap();
-        assert_eq!(metadata.size, 100);
+        assert_eq!(metadata, snapshot.metadata);
     }
 
     /// Ensure that the underlying Storage behaves equivalently to MockStorage

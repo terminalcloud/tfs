@@ -24,6 +24,7 @@ extern crate tempfile;
 extern crate tempdir;
 
 use uuid::Uuid;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 pub use error::{Error, Result};
@@ -85,12 +86,20 @@ impl Clone for Version {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct Snapshot {
+    pub metadata: VolumeMetadata,
+    pub blocks: HashMap<BlockIndex, ContentId>
+}
+
 pub trait Cache: Send + Sync {
     fn read(&self, id: ContentId, buf: &mut [u8]) -> ::Result<()>;
 }
 
 pub trait Storage: Cache {
-    fn set_metadata(&self, volume: &VolumeName, metadata: VolumeMetadata) -> ::Result<()>;
+    fn snapshot(&self, volume: &VolumeName, snapshot: Snapshot) -> ::Result<()>;
+
+    fn get_snapshot(&self, name: &VolumeName) -> ::Result<Snapshot>;
     fn get_metadata(&self, volume: &VolumeName) -> ::Result<VolumeMetadata>;
 
     fn create(&self, id: ContentId, data: &[u8]) -> ::Result<()>;
