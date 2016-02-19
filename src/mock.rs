@@ -1,14 +1,15 @@
 use scoped_pool::Pool;
 
 use std::collections::HashMap;
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 use std::io::Write;
 
 use util::test::gen_random_block;
 use {Storage, Cache, ContentId, VolumeMetadata, VolumeName, Snapshot, BlockIndex};
 
+#[derive(Clone)]
 pub struct MockStorage {
-    inner: RwLock<InnerMockStorage>
+    inner: Arc<RwLock<InnerMockStorage>>
 }
 
 #[derive(Default, Clone, Debug)]
@@ -20,7 +21,7 @@ struct InnerMockStorage {
 impl MockStorage {
     pub fn new() -> Self {
         MockStorage {
-            inner: RwLock::new(InnerMockStorage::default())
+            inner: Arc::new(RwLock::new(InnerMockStorage::default()))
         }
     }
 }

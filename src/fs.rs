@@ -36,11 +36,10 @@ impl<'id> Fs<'id> {
     ///
     /// Returns the local id of the volume.
     pub fn fork(&self, original: &VolumeName) -> ::Result<VolumeId> {
-        // let metadata = try!(self.storage().get_metadata(&original));
-        // try!(self.local.open(original, metadata.clone()));
+        let snapshot = try!(self.storage().get_snapshot(original));
+        let vol_id = try!(self.local.open(original.clone(), snapshot));
 
-        // Ok(metadata)
-        unimplemented!()
+        Ok(vol_id)
     }
 
     /// Read a block from a volume.
@@ -125,7 +124,8 @@ impl<'id> Fs<'id> {
     /// available for opening under the new name on this and other nodes connected to
     /// the same Storage.
     pub fn snapshot(&self, id: &VolumeId, name: VolumeName) -> ::Result<()> {
-        unimplemented!()
+        self.local().snapshot(id)
+            .and_then(|snapshot| self.storage.snapshot(&name, snapshot))
     }
 
     pub fn local(&self) -> &LocalFs<'id> { &self.local }

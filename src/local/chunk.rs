@@ -27,14 +27,14 @@ impl<'id> Chunk<'id> {
     ///
     /// The lock should only be released after the new ImmutableChunk is in the
     /// content id map in the Stable state.
-    pub fn freeze<'chunk>(this: &'chunk Monitor<Self>) -> Option<FreezeGuard<'chunk, 'id>> {
+    pub fn freeze<'chunk>(this: &'chunk Monitor<Self>) -> Result<FreezeGuard<'chunk, 'id>, ContentId> {
         loop {
             { // Wait for the chunk to enter into a freezable state.
                 let read = this.read().unwrap();
                 match **read {
                     // Abort, the chunk is already immutable or another thread
                     // is currently
-                    Chunk::Immutable(_) => return None,
+                    Chunk::Immutable(id) => return Err(id),
 
                     Chunk::Mutable(ref m) => m.wait_for_freeze(),
                 };
@@ -48,11 +48,11 @@ impl<'id> Chunk<'id> {
             let current = mem::replace(&mut **write, sentinel);
 
             match current {
-                c @ Chunk::Immutable(_) => {
+                Chunk::Immutable(id) => {
                     // Write back over the sentinel and complete, another thread
                     // beat us to the punch.
-                    **write = c;
-                    return None
+                    **write = Chunk::Immutable(id);
+                    return Err(id)
                 },
 
                 Chunk::Mutable(m) => {
@@ -67,7 +67,7 @@ impl<'id> Chunk<'id> {
                             // Return a guard over this chunk, which should be held
                             // until the new ImmutableChunk is included in the content id
                             // map.
-                            return Some(FreezeGuard {
+                            return Ok(FreezeGuard {
                                 guard: write,
                                 index: Some(index),
                                 id: id
@@ -167,7 +167,7 @@ impl<'id> MutableChunk<'id> {
         self.state.notify_all();
 
         // Increment the version (always from 0 to 1)
-        self.version.increment()
+        self.version.increment() + 1
     }
 
     pub fn wait_for_write(&self) -> MappedSharedMutexWriteGuard<Index<'id>> {
@@ -202,7 +202,7 @@ impl<'id> MutableChunk<'id> {
                 panic!("Logic error! Reserved state observed during complete_write!")
         };
 
-        self.version().increment()
+        self.version().increment() + 1
     }
 
     pub fn wait_for_read(&self) -> MappedSharedMutexReadGuard<Index<'id>> {
@@ -271,6 +271,9 @@ impl<'id> MutableChunk<'id> {
             // NOTE: Maybe we should assert this can't happen.
             state => state,
         };
+
+        // Notify waiters of the state transition.
+        lock.notify_all();
 
         Ok(())
     }

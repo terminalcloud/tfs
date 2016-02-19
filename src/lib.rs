@@ -46,6 +46,10 @@ pub struct BlockIndex(usize);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct VolumeId(Uuid);
 
+impl VolumeId {
+    pub fn new() -> Self { VolumeId(Uuid::new_v4()) }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ContentId([u8; 32]);
 
@@ -204,6 +208,62 @@ mod test {
                     }
                 }
             });
+
+            fs.shutdown();
+        });
+
+        pool.shutdown();
+    }
+
+    #[test]
+    fn test_basic_snapshot_fork() {
+        let pool = Pool::new(12);
+        let tempdir = ::tempdir::TempDir::new("tfs-test").unwrap();
+
+        let localfs = LocalFs::new(Options {
+            mount: tempdir.path().into(),
+            size: 100,
+            flush_threads: 4,
+            sync_threads: 4
+        }).unwrap();
+
+        let fs = &Fs::new(Box::new(MockStorage::new()), Vec::new(), localfs);
+
+        pool.scoped(move |scope| {
+            fs.local().init(fs, scope).unwrap();
+
+            let original = VolumeName("original".to_string());
+            let fork = VolumeName("fork".to_string());
+            let metadata = VolumeMetadata { size: 20 };
+
+            // Create a volume, write to it.
+            let original_id = fs.create(&original, metadata).unwrap();
+            fs.write(&original_id, BlockIndex(5), 10, &[7, 6, 5, 4, 3, 2]).unwrap();
+
+            // Snapshot that volume under the name fork.
+            fs.snapshot(&original_id, fork.clone()).unwrap();
+
+            // Open the snapshot we just created.
+            let fork_id = fs.fork(&fork).unwrap();
+
+            // Read from the forked volume, check that the data is what
+            // we wrote.
+            let mut buf: &mut [u8] = &mut [0; 6];
+            fs.read(&fork_id, BlockIndex(5), 10, buf).unwrap();
+            assert_eq!(&*buf, &[7, 6, 5, 4, 3, 2]);
+
+            // Write to the original, check it doesn't show up in the fork.
+            fs.write(&original_id, BlockIndex(5), 10, &[1, 2, 3]).unwrap();
+
+            // Check the fork.
+            let mut buf: &mut [u8] = &mut [0; 6];
+            fs.read(&fork_id, BlockIndex(5), 10, buf).unwrap();
+            assert_eq!(&*buf, &[7, 6, 5, 4, 3, 2]);
+
+            // Check the write went through on the original.
+            let mut buf: &mut [u8] = &mut [0; 6];
+            fs.read(&original_id, BlockIndex(5), 10, buf).unwrap();
+            assert_eq!(&*buf, &[1, 2, 3, 4, 3, 2]);
 
             fs.shutdown();
         });

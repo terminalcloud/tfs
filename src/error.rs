@@ -7,6 +7,7 @@ pub enum Error {
     NotFound,
     AlreadyExists,
     AlreadyFrozen,
+    ConcurrentSnapshot,
     Io(io::Error)
 }
 
@@ -42,6 +43,14 @@ impl Error {
             e => panic!("Not already-frozen error: {:?}!", e)
         }
     }
+
+    /// Testing helper for asserting this error is Error::ConcurrentSnapshot
+    pub fn assert_concurrent_snapshot(self) {
+        match self {
+            Error::ConcurrentSnapshot => {},
+            e => panic!("Not concurrent-snapshot error: {:?}!", e)
+        }
+    }
 }
 
 impl From<io::Error> for Error {
@@ -62,6 +71,7 @@ impl ::std::error::Error for Error {
             Error::NotFound => "Not Found",
             Error::AlreadyExists => "Already Exists",
             Error::AlreadyFrozen => "Already Frozen",
+            Error::ConcurrentSnapshot => "Concurrent Snapshot",
             Error::Io(ref io) => io.description()
         }
     }

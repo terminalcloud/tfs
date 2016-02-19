@@ -2,10 +2,10 @@ use shared_mutex::monitor::Monitor;
 use crossbeam::sync::MsQueue;
 use terminal_linked_hash_map::LinkedHashMap;
 use scoped_pool::Scope;
-use uuid::Uuid;
 
 use std::fs::OpenOptions;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock, Mutex, MutexGuard};
 use std::io::Write;
 use std::path::PathBuf;
@@ -16,7 +16,8 @@ use local::chunk::{Chunk, MutableChunk, ImmutableChunk};
 use util::RwLockExt;
 use sparse::{IndexedSparseFile, BLOCK_SIZE};
 use fs::Fs;
-use {Storage, Cache, VolumeMetadata, VolumeName, VolumeId, Version, ContentId, BlockIndex};
+use {Storage, Cache, VolumeMetadata, VolumeName, VolumeId, Version, ContentId,
+     BlockIndex, Snapshot};
 
 mod flush;
 mod chunk;
@@ -78,7 +79,7 @@ impl<'id> LocalFs<'id> {
         // If there is no id for this volume generate one and keep track of it.
         self.names.if_then(|names| !names.contains_key(&volume),
                            |names| names.insert(volume.clone(),
-                                                VolumeId(Uuid::new_v4())));
+                                                VolumeId::new()));
 
         // Load the id for this name.
         let id = *self.names.read().unwrap().get(&volume).unwrap();
@@ -86,6 +87,16 @@ impl<'id> LocalFs<'id> {
         // Just insert, since we "know" all ids are unique.
         self.volumes.write().unwrap()
             .insert(id, RwLock::new(Volume::new(volume, metadata)));
+
+        Ok(id)
+    }
+
+    pub fn open(&self, volume: VolumeName, snapshot: Snapshot) -> ::Result<VolumeId> {
+        let id = VolumeId::new();
+
+        // Just create a new anonymous volume here.
+        self.volumes.write().unwrap()
+            .insert(id, RwLock::new(Volume::open(volume, snapshot)));
 
         Ok(id)
     }
@@ -211,7 +222,7 @@ impl<'id> LocalFs<'id> {
                     try!(self.file.write(&mut index, offset, data));
 
                     let mutable = MutableChunk::dirty(index);
-                    let version = mutable.version().increment();
+                    let version = mutable.version().increment() + 1;
                     **chunk_guard = Chunk::Mutable(mutable);
 
                     // TODO: Queue Sync action.
@@ -293,14 +304,56 @@ impl<'id> LocalFs<'id> {
         }).unwrap_or(Err(::Error::NotFound))
     }
 
-    pub fn snapshot(&self, volume: &VolumeId) -> ::Result<VolumeMetadata> {
-        unimplemented!()
+    pub fn snapshot(&self, volume: &VolumeId) -> ::Result<Snapshot> {
+        self.volumes.read().unwrap().get(volume)
+            .ok_or(::Error::NotFound)
+            .and_then(|volume| {
+                let volume = volume.read().unwrap();
+
+                // If the snapshotting flag was already set to true.
+                if volume.snapshotting.compare_and_swap(false, true, Ordering::SeqCst) {
+                    return Err(::Error::ConcurrentSnapshot)
+                }
+
+                let mut blocks = HashMap::new();
+
+                // We are now the sole thread doing a snapshot.
+                for (&block, chunk) in volume.blocks.iter() {
+                    let id = match Chunk::freeze(&chunk) {
+                        // Chunk already frozen.
+                        Err(id) => id,
+
+                        Ok(mut freeze_guard) => {
+                            let mut chunks = self.chunks.lock().unwrap();
+                            let id = freeze_guard.id();
+
+                            try!(self.evict_if_needed(&mut chunks));
+                            let new_chunk = ImmutableChunk::from_mutable(freeze_guard.take_index());
+                            chunks.insert(id, Arc::new(new_chunk));
+
+                            id
+                        }
+                    };
+
+                    blocks.insert(block, id);
+                }
+
+                let snapshot = Snapshot {
+                    metadata: volume.metadata,
+                    blocks: blocks
+                };
+
+                // Snapshot complete, allow others to proceed.
+                volume.snapshotting.store(false, Ordering::SeqCst);
+
+                Ok(snapshot)
+            })
     }
 
     pub fn complete_flush(&self, volume: &VolumeId, block: BlockIndex,
                           id: ContentId, version: Version) -> ::Result<()> {
         self.on_chunk(volume, block, |chunk| {
-            if let Chunk::Mutable(ref mut m) = **chunk.write().unwrap() {
+            if let Chunk::Mutable(ref m) = **chunk.read().unwrap() {
                 m.complete_flush(id, version)
             } else {
                 Ok(())
@@ -341,7 +394,10 @@ impl<'id> LocalFs<'id> {
 struct Volume<'id> {
     blocks: HashMap<BlockIndex, Monitor<Chunk<'id>>>,
     metadata: VolumeMetadata,
-    name: VolumeName
+    name: VolumeName,
+
+    // Is this volume currently being snapshotted?
+    snapshotting: AtomicBool
 }
 
 impl<'id> Volume<'id> {
@@ -353,7 +409,26 @@ impl<'id> Volume<'id> {
         Volume {
             blocks: blocks,
             metadata: metadata,
-            name: name
+            name: name,
+            snapshotting: AtomicBool::new(false)
+        }
+    }
+
+    fn open(name: VolumeName, mut snapshot: Snapshot) -> Self {
+        let blocks = (0..snapshot.metadata.size).map(|block_index| {
+            let block = BlockIndex(block_index);
+            let id = snapshot.blocks.remove(&block)
+                .unwrap_or_else(|| ContentId::null());
+            let chunk = Monitor::new(Chunk::Immutable(id));
+
+            (block, chunk)
+        }).collect();
+
+        Volume {
+            blocks: blocks,
+            metadata: snapshot.metadata,
+            name: name,
+            snapshotting: AtomicBool::new(false)
         }
     }
 }
