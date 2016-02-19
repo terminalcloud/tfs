@@ -142,7 +142,6 @@ mod test {
                         fs.read(&vol_id, BlockIndex(i), 20, buf).unwrap();
                         assert_eq!(&*data1, &*buf);
 
-                        let mut buf: &mut [u8] = &mut [0u8; 50];
                         fs.read(&vol_id, BlockIndex(i), 100, buf).unwrap();
                         assert_eq!(&*data2, &*buf);
                     });
@@ -190,7 +189,6 @@ mod test {
                             fs.read(&vol_id, BlockIndex(i), 20, buf).unwrap();
                             assert_eq!(&*data1, &*buf);
 
-                            let mut buf: &mut [u8] = &mut [0u8; 50];
                             fs.read(&vol_id, BlockIndex(i), 100, buf).unwrap();
                             assert_eq!(&*data2, &*buf);
                         });
