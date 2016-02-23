@@ -84,7 +84,7 @@ impl<'id> Fs<'id> {
                 // TODO: Potential micro-optimization - if offset == 0
                 // and buffer.len() >= BLOCK_SIZE, we can just use it
                 // instead of allocating our own.
-                let read_buffer = &mut [0; BLOCK_SIZE];
+                let read_buffer: &mut [u8] = &mut [0; BLOCK_SIZE];
 
                 self.caches.iter().map(|c| &**c)
                     .chain(iter::once(&self.storage as &Cache))
@@ -94,7 +94,7 @@ impl<'id> Fs<'id> {
                         // Write back the data we got to our local fs.
                         self.local.write_immutable(id, read_buffer)
                     }).and_then(|_| {
-                        Ok(try!(buffer.write(read_buffer).map(|_| ())))
+                        Ok(try!(buffer.write(&read_buffer[offset..]).map(|_| ())))
                     })
             }
         }
