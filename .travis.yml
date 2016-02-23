@@ -4,14 +4,19 @@ os:
     - linux
     - osx
 
-# FIXME: When we land FUSE integration, reactive and figure out OS X too.
-# addons:
-#     apt:
-#         packages:
-#             - libfuse-dev
+# Install FUSE on linux
+addons:
+    apt:
+        packages:
+            - libfuse-dev
+
+# Install FUSE on OS X
+install:
+  - if [ "$TRAVIS_OS_NAME" == "osx" ]; then
+        brew update && brew install osxfuse;
+    fi
 
 rust:
     - nightly
     - beta
-    # FIXME: See #2
-    # - stable
+    - stable
