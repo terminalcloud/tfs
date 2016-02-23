@@ -1,9 +1,15 @@
 language: rust
-os: linux
-addons:
-    apt:
-        packages:
-            - libfuse-dev
+
+os:
+    - linux
+    - osx
+
+# FIXME: When we land FUSE integration, reactive and figure out OS X too.
+# addons:
+#     apt:
+#         packages:
+#             - libfuse-dev
+
 rust:
     - nightly
     - beta
