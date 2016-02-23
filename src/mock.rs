@@ -7,7 +7,7 @@ use std::io::Write;
 use util::test::gen_random_block;
 use {Storage, Cache, ContentId, VolumeMetadata, VolumeName, Snapshot, BlockIndex};
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct MockStorage {
     inner: Arc<RwLock<InnerMockStorage>>
 }

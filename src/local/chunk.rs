@@ -12,6 +12,7 @@ use {ContentId, Version};
 ///
 /// Each block is either immutable and therefore identified by its ContentId,
 /// or mutable, in which case its state is directly available.
+#[derive(Debug)]
 pub enum Chunk<'id> {
     Immutable(ContentId),
     Mutable(MutableChunk<'id>)
@@ -126,6 +127,7 @@ impl<'chunk, 'id> FreezeGuard<'chunk, 'id> {
 /// The version is also used to identify a particular write to the chunk to the
 /// flushing threads, which can check if the chunk has changed since the flush
 /// was requested, and can cancel the flush if it has.
+#[derive(Debug)]
 pub struct MutableChunk<'id> {
     version: Version,
     state: Monitor<MutableChunkState<'id>>
@@ -306,6 +308,7 @@ pub enum MutableChunkState<'id> {
 }
 
 /// The in-memory state associated with an immutable chunk.
+#[derive(Debug)]
 pub struct ImmutableChunk<'id> {
     state: Monitor<ImmutableChunkState<'id>>
 }
