@@ -25,22 +25,28 @@ impl<'id> Fs<'id> {
     }
 
     pub fn run<F, R>(threads: usize, local: Options, storage: Box<Storage>,
-                                    caches: Vec<Box<Cache>>, fun: F) -> ::Result<R>
+                     caches: Vec<Box<Cache>>, fun: F) -> ::Result<R>
     where F: for<'fs> FnOnce(&'fs Fs<'id>, &Scope<'fs>) -> R {
         let pool = Pool::new(threads);
         let localfs = try!(LocalFs::new(local));
         let fs = &Fs::new(storage, caches, localfs);
 
-        let res = pool.scoped(move |scope| {
+        // Shut down the pool on exit or panic.
+        defer!(pool.shutdown());
+
+        pool.scoped(move |scope| {
             try!(fs.init(scope));
-            let res = scope.zoom(|scope| fun(fs, scope));
-            fs.shutdown();
-            Ok(res)
-        });
-
-        pool.shutdown();
-
-        res
+            Ok(scope.zoom(|scope| {
+                // If the function panics, we want to shut down the
+                // fs so that the flushing and syncing tasks complete.
+                //
+                // If we don't shutdown the fs, the pool cannot unwind
+                // outside the scoped block since the flushing and syncing
+                // threads will still be active, causing a deadlock.
+                defer!(fs.shutdown());
+                fun(fs, scope)
+            }))
+        })
     }
 
     pub fn init<'fs>(&'fs self, scope: &Scope<'fs>) -> ::Result<()> {

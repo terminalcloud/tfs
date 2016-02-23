@@ -16,6 +16,9 @@ extern crate variance;
 extern crate tiny_keccak as sha;
 
 #[macro_use]
+extern crate scopeguard;
+
+#[macro_use]
 extern crate log;
 
 #[cfg(test)]
