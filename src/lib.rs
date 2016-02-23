@@ -235,5 +235,51 @@ mod test {
 
         }).unwrap();
     }
+
+    #[test]
+    fn test_shared_snapshot() {
+        let tempdir1 = ::tempdir::TempDir::new("tfs-test").unwrap();
+        let tempdir2 = ::tempdir::TempDir::new("tfs-test").unwrap();
+
+        let options1 = Options {
+            mount: tempdir1.path().into(),
+            size: 100,
+            flush_threads: 4,
+            sync_threads: 4
+        };
+
+        let options2 = Options {
+            mount: tempdir2.path().into(),
+            size: 100,
+            flush_threads: 4,
+            sync_threads: 4
+        };
+
+        let storage = MockStorage::new();
+
+        Fs::run(12, options1, Box::new(storage.clone()), Vec::new(), |fs1, scope1| {
+            Fs::run(12, options2, Box::new(storage.clone()), Vec::new(), |fs2, scope2| {
+                let original = VolumeName("original".to_string());
+                let fork = VolumeName("fork".to_string());
+                let metadata = VolumeMetadata { size: 20 };
+
+                // Create a volume, write to it.
+                let original_id = fs1.create(&original, metadata).unwrap();
+                fs1.write(&original_id, BlockIndex(5), 10, &[7, 6, 5, 4, 3, 2]).unwrap();
+
+                // Snapshot that volume under the name fork.
+                fs1.snapshot(&original_id, fork.clone()).unwrap();
+
+                // Open the volume on the *other* fs instance.
+                let fork_id = fs2.fork(&fork).unwrap();
+
+                // Read from the forked volume, check that the data is what
+                // we wrote.
+                let mut buf: &mut [u8] = &mut [0; 6];
+                fs2.read(&fork_id, BlockIndex(5), 10, buf).unwrap();
+                assert_eq!(&*buf, &[7, 6, 5, 4, 3, 2]);
+            }).unwrap();
+        }).unwrap();
+    }
 }
 
