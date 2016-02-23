@@ -112,10 +112,8 @@ pub trait Storage: Cache {
 
 #[cfg(test)]
 mod test {
-    use scoped_pool::Pool;
-
     use fs::Fs;
-    use local::{Options, LocalFs};
+    use local::Options;
     use mock::MockStorage;
     use util::test::gen_random_block;
 
@@ -123,26 +121,54 @@ mod test {
 
     #[test]
     fn test_create_write_read() {
-        let pool = Pool::new(12);
         let tempdir = ::tempdir::TempDir::new("tfs-test").unwrap();
-
-        let localfs = LocalFs::new(Options {
+        let options = Options {
             mount: tempdir.path().into(),
             size: 100,
             flush_threads: 4,
             sync_threads: 4
-        }).unwrap();
+        };
 
-        let fs = &Fs::new(Box::new(MockStorage::new()), Vec::new(), localfs);
-
-        pool.scoped(move |scope| {
-            fs.local().init(fs, scope).unwrap();
-
+        Fs::run(12, options, Box::new(MockStorage::new()), Vec::new(), |fs, scope| {
             let name = VolumeName("test-volume".to_string());
             let metadata = VolumeMetadata { size: 10 };
             let vol_id = fs.create(&name, metadata).unwrap();
 
-            scope.zoom(|scope| {
+            for i in 0..10 {
+                scope.execute(move || {
+                    let data1 = gen_random_block(50).1;
+                    fs.write(&vol_id, BlockIndex(i), 20, &data1).unwrap();
+
+                    let data2 = gen_random_block(50).1;
+                    fs.write(&vol_id, BlockIndex(i), 100, &data2).unwrap();
+
+                    let mut buf: &mut [u8] = &mut [0u8; 50];
+                    fs.read(&vol_id, BlockIndex(i), 20, buf).unwrap();
+                    assert_eq!(&*data1, &*buf);
+
+                    fs.read(&vol_id, BlockIndex(i), 100, buf).unwrap();
+                    assert_eq!(&*data2, &*buf);
+                });
+            }
+        }).unwrap();
+    }
+
+    #[test]
+    fn test_multi_volume() {
+        let tempdir = ::tempdir::TempDir::new("tfs-test").unwrap();
+        let options = Options {
+            mount: tempdir.path().into(),
+            size: 100,
+            flush_threads: 4,
+            sync_threads: 4
+        };
+
+        Fs::run(12, options, Box::new(MockStorage::new()), Vec::new(), |fs, scope| {
+            for name in 0..10 {
+                let name = VolumeName(format!("test-volume{}", name));
+                let metadata = VolumeMetadata { size: 10 };
+                let vol_id = fs.create(&name, metadata).unwrap();
+
                 for i in 0..10 {
                     scope.execute(move || {
                         let data1 = gen_random_block(50).1;
@@ -159,79 +185,21 @@ mod test {
                         assert_eq!(&*data2, &*buf);
                     });
                 }
-            });
-
-            fs.shutdown();
-        });
-
-        pool.shutdown();
-    }
-
-    #[test]
-    fn test_multi_volume() {
-        let pool = Pool::new(12);
-        let tempdir = ::tempdir::TempDir::new("tfs-test").unwrap();
-
-        let localfs = LocalFs::new(Options {
-            mount: tempdir.path().into(),
-            size: 100,
-            flush_threads: 4,
-            sync_threads: 4
+            }
         }).unwrap();
-
-        let fs = &Fs::new(Box::new(MockStorage::new()), Vec::new(), localfs);
-
-        pool.scoped(move |scope| {
-            fs.local().init(fs, scope).unwrap();
-
-            scope.zoom(move |scope| {
-                for name in 0..10 {
-                    let name = VolumeName(format!("test-volume{}", name));
-                    let metadata = VolumeMetadata { size: 10 };
-                    let vol_id = fs.create(&name, metadata).unwrap();
-
-                    for i in 0..10 {
-                        scope.execute(move || {
-                            let data1 = gen_random_block(50).1;
-                            fs.write(&vol_id, BlockIndex(i), 20, &data1).unwrap();
-
-                            let data2 = gen_random_block(50).1;
-                            fs.write(&vol_id, BlockIndex(i), 100, &data2).unwrap();
-
-                            let mut buf: &mut [u8] = &mut [0u8; 50];
-                            fs.read(&vol_id, BlockIndex(i), 20, buf).unwrap();
-                            assert_eq!(&*data1, &*buf);
-
-                            fs.read(&vol_id, BlockIndex(i), 100, buf).unwrap();
-                            assert_eq!(&*data2, &*buf);
-                        });
-                    }
-                }
-            });
-
-            fs.shutdown();
-        });
-
-        pool.shutdown();
     }
 
     #[test]
     fn test_basic_snapshot_fork() {
-        let pool = Pool::new(12);
         let tempdir = ::tempdir::TempDir::new("tfs-test").unwrap();
-
-        let localfs = LocalFs::new(Options {
+        let options = Options {
             mount: tempdir.path().into(),
             size: 100,
             flush_threads: 4,
             sync_threads: 4
-        }).unwrap();
+        };
 
-        let fs = &Fs::new(Box::new(MockStorage::new()), Vec::new(), localfs);
-
-        pool.scoped(move |scope| {
-            fs.local().init(fs, scope).unwrap();
-
+        Fs::run(12, options, Box::new(MockStorage::new()), Vec::new(), |fs, scope| {
             let original = VolumeName("original".to_string());
             let fork = VolumeName("fork".to_string());
             let metadata = VolumeMetadata { size: 20 };
@@ -265,10 +233,7 @@ mod test {
             fs.read(&original_id, BlockIndex(5), 10, buf).unwrap();
             assert_eq!(&*buf, &[1, 2, 3, 4, 3, 2]);
 
-            fs.shutdown();
-        });
-
-        pool.shutdown();
+        }).unwrap();
     }
 }
 

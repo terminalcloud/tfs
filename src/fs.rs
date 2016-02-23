@@ -1,7 +1,9 @@
+use scoped_pool::{Pool, Scope};
+
 use std::io::Write;
 use std::iter;
 
-use local::{LocalFs, IoResult};
+use local::{LocalFs, IoResult, Options};
 use sparse::BLOCK_SIZE;
 use {Storage, Cache, VolumeId, VolumeName, VolumeMetadata, BlockIndex};
 
@@ -20,6 +22,29 @@ impl<'id> Fs<'id> {
             caches: caches,
             local: local
         }
+    }
+
+    pub fn run<F, R>(threads: usize, local: Options, storage: Box<Storage>,
+                                    caches: Vec<Box<Cache>>, fun: F) -> ::Result<R>
+    where F: for<'fs> FnOnce(&'fs Fs<'id>, &Scope<'fs>) -> R {
+        let pool = Pool::new(threads);
+        let localfs = try!(LocalFs::new(local));
+        let fs = &Fs::new(storage, caches, localfs);
+
+        let res = pool.scoped(move |scope| {
+            try!(fs.init(scope));
+            let res = scope.zoom(|scope| fun(fs, scope));
+            fs.shutdown();
+            Ok(res)
+        });
+
+        pool.shutdown();
+
+        res
+    }
+
+    pub fn init<'fs>(&'fs self, scope: &Scope<'fs>) -> ::Result<()> {
+        self.local().init(self, scope)
     }
 
     /// Create a new volume.
