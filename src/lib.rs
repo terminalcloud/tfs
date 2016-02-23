@@ -264,6 +264,7 @@ mod test {
             Fs::run(12, options2, Box::new(storage.clone()), Vec::new(), |fs2, scope2| {
                 let original = VolumeName("original".to_string());
                 let fork = VolumeName("fork".to_string());
+                let another_fork = VolumeName("fork2".to_string());
                 let metadata = VolumeMetadata { size: 20 };
 
                 // Create a volume, write to it.
@@ -281,6 +282,25 @@ mod test {
                 let mut buf: &mut [u8] = &mut [0; 6];
                 fs2.read(&fork_id, BlockIndex(5), 10, buf).unwrap();
                 assert_eq!(&*buf, &[7, 6, 5, 4, 3, 2]);
+
+                // Write to the forked volume.
+                fs2.write(&fork_id, BlockIndex(5), 5, &[123, 124, 125]).unwrap();
+
+                // Confirm the write.
+                let mut buf: &mut [u8] = &mut [0; 3];
+                fs2.read(&fork_id, BlockIndex(5), 5, buf).unwrap();
+                assert_eq!(&*buf, &[123, 124, 125]);
+
+                // Snapshot the fork.
+                fs2.snapshot(&fork_id, another_fork.clone()).unwrap();
+
+                // Re-open the new snapshot on the first fs.
+                let fork_id2 = fs1.fork(&another_fork).unwrap();
+
+                // Read the data again.
+                let mut buf: &mut [u8] = &mut [0; 11];
+                fs1.read(&fork_id2, BlockIndex(5), 5, buf).unwrap();
+                assert_eq!(&*buf, &[123, 124, 125, 0, 0, 7, 6, 5, 4, 3, 2]);
             }).unwrap();
         }).unwrap();
     }
