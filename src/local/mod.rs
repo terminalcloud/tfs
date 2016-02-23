@@ -335,6 +335,9 @@ impl<'id> LocalFs<'id> {
                         }
                     };
 
+                    // Don't record null content ids.
+                    if id == ContentId::null() { continue }
+
                     blocks.insert(block, id);
                 }
 
