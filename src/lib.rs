@@ -304,5 +304,40 @@ mod test {
             }).unwrap();
         }).unwrap();
     }
+
+    #[test]
+    #[should_panic]
+    fn test_fs_run_panic() {
+        let tempdir = ::tempdir::TempDir::new("tfs-test").unwrap();
+        let options = Options {
+            mount: tempdir.path().into(),
+            size: 100,
+            flush_threads: 4,
+            sync_threads: 4
+        };
+
+        let m = ::std::sync::Arc::new(::std::sync::Mutex::new(()));
+
+        Fs::run(12, options, Box::new(MockStorage::new()), Vec::new(), |fs, scope| {
+            // Will unlock when we panic.
+            let m1 = m.clone();
+            let _l = m1.lock().unwrap();
+
+            scope.execute(move || {
+                // We have panicked.
+                let _l = m.lock();
+                assert!(_l.is_err());
+
+                // Just do some actions to make sure the Fs is still ok.
+                let name = VolumeName("x".to_string());
+                let metadata = VolumeMetadata { size: 20 };
+
+                let id = fs.create(&name, metadata).unwrap();
+                fs.write(&id, BlockIndex(3), 5, &[1, 5, 6, 7, 8, 8, 9]).unwrap();
+            });
+
+            panic!("test panic");
+        }).unwrap();
+    }
 }
 
