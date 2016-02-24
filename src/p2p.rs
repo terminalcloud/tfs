@@ -1,3 +1,4 @@
+#![allow(dead_code, unused_variables)]
 use {Cache, ContentId};
 
 pub struct P2PCache {

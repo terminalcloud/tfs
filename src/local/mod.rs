@@ -287,7 +287,7 @@ impl<'id> LocalFs<'id> {
         self.on_chunk(volume, block, |chunk| {
             match **chunk.write().unwrap() {
                 // Impossible, since snapshot waits for Stable and we are Reserved.
-                Chunk::Immutable(id) =>
+                Chunk::Immutable(_) =>
                     panic!("Logic error! Immutable chunk found when finishing mutable write."),
 
                 // It's a mutable chunk, fill it, setting it to Dirty.

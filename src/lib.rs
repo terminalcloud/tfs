@@ -1,8 +1,5 @@
 //! Lazy, peer-to-peer immutable object store.
 
-// FIXME: REMOVE THIS!!!!!
-#![allow(dead_code, unused_variables)]
-
 extern crate rand;
 extern crate uuid;
 extern crate libc;
@@ -202,7 +199,7 @@ mod test {
             sync_threads: 4
         };
 
-        Fs::run(12, options, Box::new(MockStorage::new()), Vec::new(), |fs, scope| {
+        Fs::run(12, options, Box::new(MockStorage::new()), Vec::new(), |fs, _scope| {
             let original = VolumeName("original".to_string());
             let fork = VolumeName("fork".to_string());
             let metadata = VolumeMetadata { size: 20 };
@@ -260,8 +257,8 @@ mod test {
 
         let storage = MockStorage::new();
 
-        Fs::run(12, options1, Box::new(storage.clone()), Vec::new(), |fs1, scope1| {
-            Fs::run(12, options2, Box::new(storage.clone()), Vec::new(), |fs2, scope2| {
+        Fs::run(12, options1, Box::new(storage.clone()), Vec::new(), |fs1, _scope1| {
+            Fs::run(12, options2, Box::new(storage.clone()), Vec::new(), |fs2, _scope2| {
                 let original = VolumeName("original".to_string());
                 let fork = VolumeName("fork".to_string());
                 let another_fork = VolumeName("fork2".to_string());

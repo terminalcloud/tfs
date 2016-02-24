@@ -66,12 +66,6 @@ impl InnerMockStorage {
         self.volumes.get(name).cloned().ok_or(::Error::NotFound)
     }
 
-    fn set_metadata(&mut self, volume: &VolumeName, metadata: VolumeMetadata) -> ::Result<()> {
-        self.volumes.get_mut(volume).map(|snap| {
-            snap.metadata = metadata;
-        }).ok_or(::Error::NotFound)
-    }
-
     fn get_metadata(&self, volume: &VolumeName) -> ::Result<VolumeMetadata> {
         self.volumes.get(&volume).map(|snap| &snap.metadata).cloned().ok_or(::Error::NotFound)
     }
@@ -192,7 +186,7 @@ impl<S: Storage> StorageFuzzer<S> {
     /// errors in the Storage implementation.
     ///
     /// See `run` for an explanation of the `magnitude` parameter.
-    pub fn check_against_mock(&self, magnitude: usize) {
+    pub fn check_against_mock(&self, _magnitude: usize) {
         // Generate a bunch of random objects
     }
 }

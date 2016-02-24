@@ -1,3 +1,4 @@
+#![allow(dead_code, unused_variables)]
 use {Storage, Cache, VolumeName, ContentId, VolumeMetadata, Snapshot};
 
 pub struct S3Storage {

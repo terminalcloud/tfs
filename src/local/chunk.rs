@@ -69,7 +69,7 @@ impl<'id> Chunk<'id> {
                             // until the new ImmutableChunk is included in the content id
                             // map.
                             return Ok(FreezeGuard {
-                                guard: write,
+                                _guard: write,
                                 index: Some(index),
                                 id: id
                             })
@@ -99,7 +99,7 @@ impl<'id> Chunk<'id> {
 /// An exclusive guard over a chunk held while creating a new
 /// ImmutableChunk entry for it when freezing.
 pub struct FreezeGuard<'chunk, 'id: 'chunk> {
-    guard: MonitorWriteGuard<'chunk, Chunk<'id>>,
+    _guard: MonitorWriteGuard<'chunk, Chunk<'id>>,
     index: Option<Index<'id>>,
     id: ContentId
 }

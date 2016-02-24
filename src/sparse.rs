@@ -24,14 +24,14 @@ pub struct IndexedSparseFile<'id> {
 #[derive(Debug, Hash, PartialEq, Eq)]
 #[must_use]
 pub struct Index<'id> {
-    id: InvariantLifetime<'id>,
+    _id: InvariantLifetime<'id>,
     index: Frozen<usize>
 }
 
 impl<'id> Index<'id> {
     pub fn unchecked_new(index: usize) -> Index<'id> {
         Index {
-            id: InvariantLifetime::new(),
+            _id: InvariantLifetime::new(),
             index: Frozen::new(index)
         }
     }
@@ -96,7 +96,7 @@ impl<'id> IndexedSparseFile<'id> {
         Ok(())
     }
 
-    pub fn resize(&mut self, target_size: usize) -> ::Result<()> {
+    pub fn resize(&mut self, _target_size: usize) -> ::Result<()> {
         unimplemented!()
     }
 
@@ -112,14 +112,14 @@ impl<'id> IndexedSparseFile<'id> {
 }
 
 pub struct IndexAllocator<'id> {
-    id: InvariantLifetime<'id>,
+    _id: InvariantLifetime<'id>,
     inner: Mutex<Slab<(), usize>>
 }
 
 impl<'id> IndexAllocator<'id> {
     fn new(size: usize) -> IndexAllocator<'id> {
         IndexAllocator {
-            id: InvariantLifetime::new(),
+            _id: InvariantLifetime::new(),
             inner: Mutex::new(Slab::new(size))
         }
     }
@@ -236,7 +236,6 @@ mod test {
         use util::test::gen_random_block;
 
         let sparse_file = IndexedSparseFile::new(tempfile().unwrap(), MAX_CHUNKS);
-        let zeroes: &[u8] = &[0; BLOCK_SIZE];
 
         // Run the test for several sets of blocks.
         for _ in 0..RUNS {

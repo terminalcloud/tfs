@@ -49,11 +49,6 @@ impl<'fs, 'id> FlushPool<'fs, 'id> {
         }
     }
 
-    /// Terminates a running FlushPool.
-    pub fn terminate(&self) {
-        self.fs.local().flush.push(FlushMessage::Quit)
-    }
-
     // Run a worker thread (should be called *on* a worker thread).
     //
     // Includes code for restarting the task under panics.
