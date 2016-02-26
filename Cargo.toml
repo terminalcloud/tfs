@@ -28,3 +28,7 @@ tempdir = "0.3"
 [dev-dependencies]
 tempfile = "2.0"
 
+[features]
+default = []
+nightly = []
+
