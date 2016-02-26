@@ -35,13 +35,13 @@ pub mod p2p;
 pub mod sparse;
 pub mod mock;
 pub mod error;
+pub mod local;
 
-mod local;
 mod impls;
 mod util;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub struct BlockIndex(usize);
+pub struct BlockIndex(pub usize);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct VolumeId(Uuid);
@@ -68,11 +68,11 @@ impl ContentId {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct VolumeName(String);
+pub struct VolumeName(pub String);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct VolumeMetadata {
-    size: usize
+    pub size: usize
 }
 
 #[derive(Debug)]

@@ -3,6 +3,10 @@ name = "tfs"
 version = "0.1.0"
 authors = ["Jonathan Reem <jonathan.reem@gmail.com>"]
 
+[[bin]]
+name = "tfs"
+path = "src/main.rs"
+
 [dependencies]
 scoped-pool = "0.1"
 rand = "0.3"
@@ -18,7 +22,9 @@ variance = "0.1"
 tiny-keccak = "1"
 scopeguard = "0.1"
 
+# TODO: Move this back to dev-dependencies.
+tempdir = "0.3"
+
 [dev-dependencies]
 tempfile = "2.0"
-tempdir = "0.3"
 
