@@ -35,17 +35,18 @@ impl<'id> Fs<'id> {
         defer!(pool.shutdown());
 
         pool.scoped(move |scope| {
+            // If the function panics, we want to shut down the
+            // fs so that the flushing and syncing tasks complete.
+            //
+            // If we don't shutdown the fs, the pool cannot unwind
+            // outside the scoped block since the flushing and syncing
+            // threads will still be active, causing a deadlock.
+            defer!(fs.shutdown());
             try!(fs.init(scope));
-            Ok(scope.zoom(|scope| {
-                // If the function panics, we want to shut down the
-                // fs so that the flushing and syncing tasks complete.
-                //
-                // If we don't shutdown the fs, the pool cannot unwind
-                // outside the scoped block since the flushing and syncing
-                // threads will still be active, causing a deadlock.
-                defer!(fs.shutdown());
-                fun(fs, scope)
-            }))
+
+            // Run the jobs on a zoomed scope, so we don't block
+            // forever waiting for the worker threads.
+            Ok(scope.zoom(|scope| fun(fs, scope)))
         })
     }
 
