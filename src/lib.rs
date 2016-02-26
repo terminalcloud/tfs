@@ -232,7 +232,6 @@ mod test {
             let mut buf: &mut [u8] = &mut [0; 6];
             fs.read(&original_id, BlockIndex(5), 10, buf).unwrap();
             assert_eq!(&*buf, &[1, 2, 3, 4, 3, 2]);
-
         }).unwrap();
     }
 
