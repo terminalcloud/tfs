@@ -1,22 +1,98 @@
 language: rust
 
-os:
-    - linux
-    - osx
+env:
+    global:
+        # Use in deploy
+        - PROJECT_NAME=tfs
 
-# Install FUSE on linux
-addons:
-    apt:
-        packages:
-            - libfuse-dev
+# Specify all of our different build configs.
+matrix:
+    # Clear defaults
+    exclude:
+        - osx
+        - linux
+
+    # Our actual builds
+    include:
+        # Cross Compiles:
+        - os: linux
+          env: TARGET=i686-unknown-linux-gnu RUST=stable
+          rust: stable # Only cross-compile from stable
+          addons:
+            apt:
+              packages:
+                # Cross compiler and cross compiled C libraries
+                - gcc-multilib
+                - libfuse-dev
+        - os: osx
+          env: TARGET=i686-apple-darwin RUST=stable
+          rust: stable # Only cross-compile from stable
+
+        # Linux x86_64-unknown-linux-musl
+        - os: linux
+          env: TARGET=x86_64-unknown-linux-musl RUST=stable
+          rust: stable
+          addons:
+            apt:
+              packages:
+                - libfuse-dev
+
+        # Native compiles:
+
+        # Linux x86_64-unknown-linux-gnu
+        - os: linux
+          env: TARGET=x86_64-unknown-linux-gnu RUST=stable
+          rust: stable
+          addons:
+            apt:
+              packages:
+                - libfuse-dev
+        - os: linux
+          env: TARGET=x86_64-unknown-linux-gnu
+          rust: beta
+          addons:
+            apt:
+              packages:
+                - libfuse-dev
+        - os: linux
+          env: TARGET=x86_64-unknown-linux-gnu
+          rust: nightly
+          addons:
+            apt:
+              packages:
+                - libfuse-dev
+
+        # OS X x86_64-apple-darwin
+        - os: osx
+          rust: stable
+          env: TARGET=x86_64-apple-darwin RUST=stable
+        - os: osx
+          rust: beta
+          env: TARGET=x86_64-apple-darwin
+        - os: osx
+          rust: nightly
+          env: TARGET=x86_64-apple-darwin
+
 
 # Install FUSE on OS X
 install:
-  - if [ "$TRAVIS_OS_NAME" == "osx" ]; then
-        brew update && brew install osxfuse;
-    fi
+    - bash ci/install.sh
 
-rust:
-    - nightly
-    - beta
-    - stable
+before_deploy:
+    - bash ci/before_deploy.sh
+
+script:
+    - bash ci/script.sh
+
+deploy:
+    provider: releases
+    api_key:
+        secure: "PYyqe9K1L6zYEeKvHbmlvDwzS+MJ6GrAT5s1OU+1jTpulffqskpVRdWhZvP3kCa1r1TJJCCdm9TmggwavzzMRghRc4dkS6zIBhig/SEAnwUcaC0MPiuUeDyRqPflbTKfxaSOKoiBfxkHUgUzCrcM4QPeq6wpx/VdxhOpazoVg7lBeYHQTZsceUd4PnPsONN1hVZFVAYgooxYzX11edMcR9sNw1ypBvAM03DO5Bc9a+sCLBiDQ2Yv3MtLB+/6FFvypyIsb5ZEY6XKtWcaxTQZV6e0BbyOVmHElzDN95rU4FLRSvdur5QoUnZUnZpMKXVsIejtfS86bRklzNvyDKMdcjngloX8Hs8rvdp/KbubperjRFTa5daoeyMcuH0ZMISF63GlAMf/coJXoInY5HYOnGtoBtuy4ky2WcsVblfh4VAE1lHBrW/Fn1u6FE7cnX310Q/3Zwk5LcrPSSMiX3na9iv8I1scc98GWeShYBIzeEkBmrP8+L3OmeaK9K+/TVkdkBFQwvSFEJOFfC0hs3OHSxJ36eZg83msTSq+ikZwwx5o9NGrqzhvgG68roGNV2DsmDEKUxBCJgZlnRhsqlu+aWEUJAGJZvkZSgz6jkqp+AOKjlfoZ0BeWTdRGzO+buQcPgbXW3ehVTU5DFt8OQfEz52zOLky3KsT/1pQqYJWndQ="
+    file: ${PROJECT_NAME}-${TRAVIS_TAG}-${TARGET}.tar.gz
+    skip_cleanup: true
+    on:
+        repo: terminalcloud/tfs # Prevent failed deploys on forks
+        condition: $RUST = stable
+        branch: master
+        tags: true
+
