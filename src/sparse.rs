@@ -155,7 +155,8 @@ impl SparseFileExt for File {
         unsafe {
             cvt(fallocate(self.as_raw_fd(),
                           FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE,
-                          offset as i64, size as i64) as i64) }.map(|_| ())
+                          offset as ::libc::off_t,
+                          size as ::libc::off_t) as ::libc::c_int) }.map(|_| ())
     }
 
     #[cfg(not(target_os = "linux"))]
@@ -171,7 +172,7 @@ impl SparseFileExt for File {
         unsafe { cvt(pread(self.as_raw_fd(),
                            buf.as_mut_ptr() as *mut ::libc::c_void,
                            buf.len(),
-                           offset as i64) as i64) }
+                           offset as ::libc::off_t) as ::libc::c_int) }
     }
 
     fn pwrite(&self, offset: usize, data: &[u8]) -> io::Result<usize> {
@@ -181,12 +182,12 @@ impl SparseFileExt for File {
         unsafe { cvt(pwrite(self.as_raw_fd(),
                             data.as_ptr() as *const ::libc::c_void,
                             data.len(),
-                            offset as i64) as i64) }
+                            offset as ::libc::off_t) as ::libc::c_int) }
     }
 }
 
 // Shim for converting C-style errors to io::Errors.
-fn cvt(err: i64) -> io::Result<usize> {
+fn cvt(err: ::libc::c_int) -> io::Result<usize> {
     if err < 0 {
         Err(io::Error::last_os_error())
     } else {
