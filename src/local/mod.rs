@@ -40,6 +40,7 @@ pub struct LocalFs<'id> {
 
 type ImmutableChunkMap<'id> = LinkedHashMap<ContentId, Arc<ImmutableChunk<'id>>>;
 
+#[derive(Debug)]
 pub struct Options {
     pub mount: PathBuf,
     pub size: usize,
@@ -47,6 +48,7 @@ pub struct Options {
     pub sync_threads: usize
 }
 
+#[derive(Debug)]
 pub enum IoResult {
     Reserved(ContentId),
     Complete
@@ -54,11 +56,14 @@ pub enum IoResult {
 
 impl<'id> LocalFs<'id> {
     pub fn new(config: Options) -> ::Result<Self> {
+        debug!("Creating new LocalFs with: config={:?}", config);
+
+        let data_path = config.mount.join("data.tfs");
         let file = try!(OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
-            .open(config.mount.join("data.tfs")));
+            .open(&data_path));
         let indexed = IndexedSparseFile::new(file, config.size);
 
         Ok(LocalFs {
@@ -106,12 +111,14 @@ impl<'id> LocalFs<'id> {
     }
 
     pub fn init<'fs>(&self, fs: &'fs Fs<'id>, scope: &Scope<'fs>) -> ::Result<()> {
+        debug!("Initializing local fs worker threads.");
         // TODO: Initiate the sync pool too.
         FlushPool::new(fs).run(self.config.flush_threads, scope);
         Ok(())
     }
 
     pub fn shutdown(&self) {
+        debug!("Shutting down local fs worker threads.");
         self.flush.push(FlushMessage::Quit);
     }
 
@@ -125,7 +132,9 @@ impl<'id> LocalFs<'id> {
 
                 // If it's a mutable chunk, just do the read and we're done!
                 Chunk::Mutable(ref m) => {
+                    debug!("Found mutable chunk when reading, waiting.");
                     let guard = m.wait_for_read();
+                    debug!("Got reading lock on mutable chunk, doing read.");
                     try!(self.file.read(&guard, offset, buffer));
                     Ok(None)
                 }
@@ -133,9 +142,11 @@ impl<'id> LocalFs<'id> {
         }).ok_or(::Error::NotFound).and_then(|x| x));
 
         if let Some(id) = id {
+            debug!("Reading immutable chunk with: id={:?}", id);
             self.read_immutable(id, offset, buffer)
         } else {
             // Mutable chunk case.
+            debug!("Read of mutable chunk complete.");
             Ok(IoResult::Complete)
         }
     }
@@ -145,22 +156,30 @@ impl<'id> LocalFs<'id> {
     // Can return IoResult::Reserved if the data is not present.
     fn read_immutable(&self, id: ContentId, offset: usize, buffer: &mut [u8]) -> ::Result<IoResult> {
         // We may have to retry
+        debug!("Reading immutable chunk with: id={:?}, offset={:?}", id, offset);
         loop {
+            debug!("Trying immutable read.");
             let chunk = self.chunks.lock().unwrap().get_refresh(&id).map(|c| c.clone());
 
             if let Some(chunk) = chunk {
+                debug!("Found immutable chunk for id={:?}, waiting for read.", id);
                 if let Some(index) = chunk.wait_for_read() {
+                    debug!("Got a stable immutable chunk we can read from at index={:?}.", index);
                     // Succesfully got a stable chunk with an index we can read from.
                     try!(self.file.read(&index, offset, buffer));
+                    debug!("Completed immutable read of id={:?}.", id);
                     return Ok(IoResult::Complete);
                 } // Else the chunk was evicted, so retry.
             } else {
+                debug!("Chunk with id={:?} not present, reserving.", id);
                 // We are the reserving thread!
                 let mut chunks = self.chunks.lock().unwrap();
                 if chunks.contains_key(&id) {
+                    debug!("Another reserving thread beat us to reserve id={:?}", id);
                     // Another thread beat us to reserving! Retry.
                     continue
                 } else {
+                    debug!("Creating and inserting new reserved immutable chunk.");
                     // We need to create a new chunk.
                     try!(self.evict_if_needed(&mut chunks));
                     chunks.insert(id, Arc::new(ImmutableChunk::new()));
@@ -171,12 +190,15 @@ impl<'id> LocalFs<'id> {
     }
 
     pub fn write_immutable(&self, id: ContentId, data: &[u8]) -> ::Result<()> {
+        debug!("Completing an earlier reservation on immutable chunk with: id={:?}", id);
         let chunk = self.chunks.lock().unwrap().get_refresh(&id).map(|c| c.clone())
             .expect("Logic error - chunk evicted in the Reserved state!");
 
+        debug!("Found chunk, allocating space and writing to file.");
         let mut index = self.file.allocate();
         try!(self.file.write(&mut index, 0, data));
 
+        debug!("Wrote to index={:?} for id={:?}, completing fill on chunk.", index, id);
         chunk.complete_fill(index);
 
         Ok(())
@@ -191,21 +213,30 @@ impl<'id> LocalFs<'id> {
         //     - throw reserved error, resume at finish_mutable_write after
         //       read_immutable
 
+        debug!("Writing to mutable chunk {:?}/{:?} at offset={:?}",
+               volume, block, offset);
+
         let id = try!(self.on_chunk(volume, block, |chunk| {
             let mut chunk_guard = chunk.write().unwrap();
 
             let id = match **chunk_guard {
                 Chunk::Mutable(ref mut m) => {
+                    debug!("Found mutable chunk, waiting to write to it.");
+
                     // Acquire write guard, execute write.
                     let mut guard = m.wait_for_write();
+                    debug!("Awaited write to mutable chunk, got index={:?}", &*guard);
                     try!(self.file.write(&mut guard, offset, data));
 
                     // Transition to Dirty, get write version.
+                    debug!("Finished write, marking chunk dirty.");
                     let version = m.complete_write(guard);
 
                     // TODO: Queue Sync action.
-                    self.flush.push(FlushMessage::Flush(volume.clone(), block,
-                                                        Version::new(version)));
+                    let flush = FlushMessage::Flush(volume.clone(), block,
+                                                    Version::new(version));
+                    debug!("Queueing flush action: {:?}", flush);
+                    self.flush.push(flush);
 
                     None
                 },
@@ -215,22 +246,28 @@ impl<'id> LocalFs<'id> {
 
             // Currently immutable case.
             if let Some(id) = id {
+                debug!("Found immutable chunk with id={:?}, transitioning", id);
                 // If the block is empty, just write and go.
                 if id == ContentId::null() {
+                    debug!("Empty chunk found. Allocating new chunk and writing.");
                     // Get an empty index and write our portion of the data.
                     let mut index = self.file.allocate();
                     try!(self.file.write(&mut index, offset, data));
 
+                    debug!("Wrote new mutable chunk to index={:?}", index);
                     let mutable = MutableChunk::dirty(index);
                     let version = mutable.version().increment() + 1;
                     **chunk_guard = Chunk::Mutable(mutable);
 
                     // TODO: Queue Sync action.
-                    self.flush.push(FlushMessage::Flush(volume.clone(), block,
-                                                        Version::new(version)));
+                    let flush = FlushMessage::Flush(volume.clone(), block,
+                                                    Version::new(version));
+                    debug!("Queueing flush action: {:?}", flush);
+                    self.flush.push(flush);
 
                     Ok(None)
                 } else {
+                    debug!("Non-empty chunk found, reserving new mutable chunk.");
                     // Set the chunk to mutable and reserved
                     **chunk_guard = Chunk::Mutable(MutableChunk::new(id));
 
@@ -244,21 +281,27 @@ impl<'id> LocalFs<'id> {
 
         // Just set to reserved case.
         if let Some(id) = id {
+            debug!("Mutable chunk reserved earlier, trying to fill from local chunk.");
             // Try to read the data locally.
             let mut block_data = vec![0; BLOCK_SIZE];
 
             match try!(self.read_immutable(id, 0, &mut block_data)) {
                 // The data was already available locally.
                 IoResult::Complete => {
+                    debug!("Found data locally, writing back to mutable chunk.");
                     // We read the data, and can now complete our write.
                     try!(self.finish_mutable_write(volume, block,
                                                    &mut block_data,
                                                    offset, data));
+                    debug!("Completed mutable chunk reservation and write.");
                     Ok(IoResult::Complete)
                 },
 
                 // The data is not available locally and must be fetched.
-                IoResult::Reserved(id) => Ok(IoResult::Reserved(id))
+                IoResult::Reserved(id) => {
+                    debug!("Couldn't find data for id={:?} locally, leaving reserved.", id);
+                    Ok(IoResult::Reserved(id))
+                }
             }
         // Mutable chunk case, we are done.
         } else {
@@ -274,6 +317,8 @@ impl<'id> LocalFs<'id> {
                 "requested write larger than block size - offset: {:?} > {:?}",
                 data.len(), block_data.len() - offset);
 
+        debug!("Filling mutable reserved chunk {:?}/{:?}", volume, block);
+
         // Write data into block_data.
         (&mut block_data[offset..]).write(data).unwrap();
 
@@ -282,6 +327,7 @@ impl<'id> LocalFs<'id> {
 
         // Write the data to the file.
         let mut index = self.file.allocate();
+        debug!("Writing data to file at index={:?}", index);
         try!(self.file.write(&mut index, 0, data));
 
         self.on_chunk(volume, block, |chunk| {
@@ -295,8 +341,10 @@ impl<'id> LocalFs<'id> {
                     let version = m.fill(index);
 
                     // TODO: Queue Sync action.
-                    self.flush.push(FlushMessage::Flush(volume.clone(), block,
-                                                        Version::new(version)));
+                    let flush = FlushMessage::Flush(volume.clone(), block,
+                                                    Version::new(version));
+                    debug!("Queueing flush action: {:?}", flush);
+                    self.flush.push(flush);
 
                     Ok(())
                 }
@@ -304,14 +352,16 @@ impl<'id> LocalFs<'id> {
         }).unwrap_or(Err(::Error::NotFound))
     }
 
-    pub fn snapshot(&self, volume: &VolumeId) -> ::Result<Snapshot> {
-        self.volumes.read().unwrap().get(volume)
+    pub fn snapshot(&self, vol_id: &VolumeId) -> ::Result<Snapshot> {
+        debug!("Snapshotting volume: {:?}", vol_id);
+        self.volumes.read().unwrap().get(vol_id)
             .ok_or(::Error::NotFound)
             .and_then(|volume| {
                 let volume = volume.read().unwrap();
 
                 // If the snapshotting flag was already set to true.
                 if volume.snapshotting.compare_and_swap(false, true, Ordering::SeqCst) {
+                    debug!("Concurrent snapshot on volume: {:?}!", vol_id);
                     return Err(::Error::ConcurrentSnapshot)
                 }
 
@@ -338,6 +388,8 @@ impl<'id> LocalFs<'id> {
                     // Don't record null content ids.
                     if id == ContentId::null() { continue }
 
+                    debug!("Recording {:?} = {:?} in snapshot of {:?}.",
+                           block, id, vol_id);
                     blocks.insert(block, id);
                 }
 
@@ -349,6 +401,7 @@ impl<'id> LocalFs<'id> {
                 // Snapshot complete, allow others to proceed.
                 volume.snapshotting.store(false, Ordering::SeqCst);
 
+                trace!("Snapshot of {:?} complete: {:#?}", vol_id, snapshot);
                 Ok(snapshot)
             })
     }
@@ -373,13 +426,16 @@ impl<'id> LocalFs<'id> {
 
     fn evict_if_needed(&self, mut chunks: &mut MutexGuard<ImmutableChunkMap<'id>>) -> ::Result<()> {
         if chunks.len() == self.config.size {
+            debug!("Chunks full! Evicting.");
             loop {
                 // self.config.size must be > 0 so this unwrap cannot fail.
                 let (id, candidate) = chunks.pop_front().unwrap();
+                debug!("Found eviction candidate with: id={:?}", id);
 
                 match candidate.begin_evict() {
                     // We are the thread evicting the block.
                     Some(Some(index)) => {
+                        debug!("Evicting block at index={:?}", index);
                         return self.file.deallocate(index)
                     },
 
@@ -387,10 +443,16 @@ impl<'id> LocalFs<'id> {
                     Some(None) => return Ok(()),
 
                     // This chunk is busy, try another.
-                    None => { chunks.insert(id, candidate); }
+                    None => {
+                        debug!("Eviction candidate {:?} is busy, trying another.", id);
+                        chunks.insert(id, candidate);
+                    }
                 }
             }
-        } else { Ok(()) }
+        } else {
+            trace!("Chunks not full, no eviction needed.");
+            Ok(())
+        }
     }
 }
 

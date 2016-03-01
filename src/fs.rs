@@ -42,6 +42,8 @@ impl<'id> Fs<'id> {
     pub fn run<F, R>(threads: usize, local: Options, storage: Box<Storage>,
                      caches: Vec<Box<Cache>>, fun: F) -> ::Result<R>
     where F: for<'fs> FnOnce(&'fs Fs<'id>, &Scope<'fs>) -> R {
+        debug!("Running new Fs with: threads={:?}, options={:?}", threads, local);
+
         let pool = Pool::new(threads);
         let localfs = try!(LocalFs::new(local));
         let fs = &Fs::new(storage, caches, localfs);
@@ -59,6 +61,7 @@ impl<'id> Fs<'id> {
             defer!(fs.shutdown());
             try!(fs.init(scope));
 
+            debug!("Initialized Fs, running callback.");
             // Run the jobs on a zoomed scope, so we don't block
             // forever waiting for the worker threads.
             Ok(scope.zoom(|scope| fun(fs, scope)))
@@ -66,6 +69,7 @@ impl<'id> Fs<'id> {
     }
 
     pub fn init<'fs>(&'fs self, scope: &Scope<'fs>) -> ::Result<()> {
+        debug!("Initializing Fs threads.");
         self.local().init(self, scope)
     }
 
@@ -76,6 +80,7 @@ impl<'id> Fs<'id> {
     ///
     /// Returns the local id of the volume.
     pub fn create(&self, name: &VolumeName, metadata: VolumeMetadata) -> ::Result<VolumeId> {
+        debug!("Creating new volume with: name={:?}, metadata={:?}", name, metadata);
         self.local.create(name.clone(), metadata)
     }
 
@@ -83,8 +88,13 @@ impl<'id> Fs<'id> {
     ///
     /// Returns the local id of the volume.
     pub fn fork(&self, original: &VolumeName) -> ::Result<VolumeId> {
+        debug!("Forking volume with: original name={:?}", original);
+
         let snapshot = try!(self.storage().get_snapshot(original));
+        debug!("Got snapshot for existing volume: {:?}", snapshot);
+
         let vol_id = try!(self.local.open(original.clone(), snapshot));
+        debug!("Forked volume {:?} to id {:?}", original, vol_id);
 
         Ok(vol_id)
     }
@@ -92,16 +102,27 @@ impl<'id> Fs<'id> {
     /// Read a block from a volume.
     pub fn read(&self, volume: &VolumeId, block: BlockIndex,
                 offset: usize, mut buffer: &mut [u8]) -> ::Result<()> {
-        // Try all of our caches in order, starting with local storage
-        // and ending with cold storage.
-        //
-        // Then, if the read succeeded, write it back to local storage
-        // for later access.
-        match try!(self.local.read(volume, block, offset, buffer)) {
+        debug!("Reading block with: volume={:?}, block={:?}, offset={:?}",
+               volume, block, offset);
+
+        // Try a local read.
+        let ioresult = try!(self.local.read(volume, block, offset, buffer));
+        debug!("Local read of {:?}/{:?} resulted in {:?}", volume, block, ioresult);
+
+        match ioresult {
             // The read succeeded locally.
-            IoResult::Complete => Ok(()),
+            IoResult::Complete => {
+                debug!("Read of {:?}/{:?} complete!", volume, block);
+                Ok(())
+            },
 
             // The read is of an immutable chunk which must be fetched.
+            //
+            // Try all of our caches in order, starting with local storage
+            // and ending with cold storage.
+            //
+            // Then, if the read succeeded, write it back to local storage
+            // for later access.
             IoResult::Reserved(id) => {
                 // TODO: Potential micro-optimization - if offset == 0
                 // and buffer.len() >= BLOCK_SIZE, we can just use it
@@ -111,11 +132,17 @@ impl<'id> Fs<'id> {
                 self.caches.iter().map(|c| &**c)
                     .chain(iter::once(&self.storage as &Cache))
                     .fold(Err(::Error::NotFound), |res, cache| {
-                        res.or_else(|_| cache.read(id, read_buffer))
+                        debug!("Got {:?}", res);
+                        res.or_else(|_| {
+                            debug!("Trying {:?}", cache);
+                            cache.read(id, read_buffer)
+                        })
                     }).and_then(|_| {
+                        debug!("Read data from cache, writing back.");
                         // Write back the data we got to our local fs.
                         self.local.write_immutable(id, read_buffer)
                     }).and_then(|_| {
+                        debug!("Wrote data locally, copying to user buffer.");
                         Ok(try!(buffer.write(&read_buffer[offset..]).map(|_| ())))
                     })
             }

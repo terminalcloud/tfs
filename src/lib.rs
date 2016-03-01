@@ -41,6 +41,7 @@ extern crate tempdir;
 use uuid::Uuid;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::fmt;
 
 pub use error::{Error, Result};
 
@@ -111,7 +112,7 @@ pub struct Snapshot {
     pub blocks: HashMap<BlockIndex, ContentId>
 }
 
-pub trait Cache: Send + Sync {
+pub trait Cache: Send + Sync + fmt::Debug {
     fn read(&self, id: ContentId, buf: &mut [u8]) -> ::Result<()>;
 }
 

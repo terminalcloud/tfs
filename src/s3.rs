@@ -16,6 +16,7 @@
 #![allow(dead_code, unused_variables)]
 use {Storage, Cache, VolumeName, ContentId, VolumeMetadata, Snapshot};
 
+#[derive(Debug)]
 pub struct S3Storage {
     blah: usize
 }

@@ -16,6 +16,7 @@
 #![allow(dead_code, unused_variables)]
 use {Cache, ContentId};
 
+#[derive(Debug)]
 pub struct P2PCache {
     blah: usize
 }
