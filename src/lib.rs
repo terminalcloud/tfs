@@ -128,12 +128,16 @@ pub trait Storage: Cache {
 
 #[cfg(test)]
 mod test {
+    use std::collections::HashMap;
+    use std::io::Write;
+
     use fs::Fs;
     use local::Options;
     use mock::MockStorage;
     use util::test::gen_random_block;
+    use sparse::BLOCK_SIZE;
 
-    use {VolumeName, VolumeMetadata, BlockIndex};
+    use {VolumeName, VolumeMetadata, BlockIndex, Snapshot, ContentId, Storage};
 
     #[test]
     fn test_create_write_read() {
@@ -350,6 +354,48 @@ mod test {
 
             panic!("test panic");
         }).unwrap();
+    }
+
+    #[test]
+    fn test_basic_flush() {
+        let tempdir = ::tempdir::TempDir::new("tfs-test").unwrap();
+        let options = Options {
+            mount: tempdir.path().into(),
+            size: 100,
+            flush_threads: 4,
+            sync_threads: 4
+        };
+
+        let storage = MockStorage::new();
+        let start_name = VolumeName("test".to_string());
+        let target_name = VolumeName("snapshot".to_string());
+        let metadata = VolumeMetadata { size: 10 };
+
+        let block = BlockIndex(5);
+        let offset = 2;
+        let data = &[1, 2, 3];
+
+        let mut block_data = vec![0; BLOCK_SIZE];
+        (&mut block_data[offset..]).write(data).unwrap();
+
+        Fs::run(12, options, Box::new(storage.clone()), Vec::new(), |fs, _scope| {
+            let vol = fs.create(&start_name, metadata).unwrap();
+            fs.write(&vol, block, offset, data).unwrap();
+            fs.snapshot(&vol, target_name.clone()).unwrap();
+        }).unwrap();
+
+        // Snapshot should be in storage now.
+        let expected = Snapshot {
+            metadata: metadata,
+            blocks: {
+                let mut blocks = HashMap::new();
+                blocks.insert(block, ContentId::hash(&block_data));
+                blocks
+            }
+        };
+
+        assert_eq!(storage.get_snapshot(&target_name).unwrap(),
+                   expected);
     }
 }
 
