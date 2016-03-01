@@ -26,7 +26,7 @@ built and uploaded to github releases, where they are available for free use.
 
 ## Developing
 
-See `HACKING.md` for instructions.
+See [HACKING.md](HACKING.md) for instructions.
 
 ## License
 
