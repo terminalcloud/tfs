@@ -2,6 +2,7 @@
 name = "tfs"
 version = "0.1.0"
 authors = ["Jonathan Reem <jonathan.reem@gmail.com>"]
+license = "GPL-3.0+"
 
 [lib]
 name = "tfs"

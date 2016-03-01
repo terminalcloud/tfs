@@ -30,5 +30,7 @@ See `HACKING.md` for instructions.
 
 ## License
 
-To be determined
+Licensed under the GPL Version 3.
+
+Full text of the license is available in LICENSE.txt
 
