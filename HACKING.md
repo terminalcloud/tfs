@@ -9,6 +9,21 @@ Common Tasks:
   - benchmark: `cargo bench --features nightly` (requires nightly rust)
   - documentation: `cargo doc --open` (requires a browser)
 
+## Environment Requirements
+
+`tfs` is continuously tested on these targets:
+  - `i686-unknown-linux-gnu`
+  - `i686-apple-darwin`
+  - `x86_64-unknown-linux-musl`
+  - `x86_64-unknown-linux-gnu`
+  - `x86_64-apple-darwin`
+
+Currently, no system packages are required to develop and test.
+In the future this is likely to change, especially to require `FUSE` for
+actually binding the library to the host filesystem. When that happens
+these instructions will be updated to explain installation and configuration
+of any non-cargo dependencies for all of the above targets.
+
 ## Structural Overview
 
 The main entry point to the library is the `Fs` type, which is a
