@@ -7,23 +7,36 @@ env:
 
 # Specify all of our different build configs.
 matrix:
-    # Clear defaults
-    exclude:
-        - osx
-        - linux
+    # Don't wait for builds that are allowed to fail.
+    fast_finish: true
+
+    allow_failures:
+        # FIXME(#9): i686-unknown-linux-gnu cross compile is broken
+        - env: TARGET=i686-unknown-linux-gnu RUST=stable PKG_CONFIG_ALLOW_CROSS=1
 
     # Our actual builds
     include:
         # Cross Compiles:
+
+        # Linux i686-unknown-linux-gnu
+        # FIXME(#9): pkg-config doesn't pick up fuse
         - os: linux
+          sudo: true
+          dist: trusty
           env: TARGET=i686-unknown-linux-gnu RUST=stable PKG_CONFIG_ALLOW_CROSS=1
           rust: stable # Only cross-compile from stable
+          install:
+              - "sudo dpkg --add-architecture i386"
+              - "sudo apt-get update || true" # This might fail but we don't care
+              - "sudo -E apt-get -yq --no-install-suggests --no-install-recommends --force-yes install libfuse-dev:i386"
+              - "bash ci/install.sh"
           addons:
             apt:
               packages:
                 # Cross compiler and cross compiled C libraries
                 - gcc-multilib
-                - libfuse-dev
+
+        # OS X i686-apple-darwin
         - os: osx
           env: TARGET=i686-apple-darwin RUST=stable PKG_CONFIG_ALLOW_CROSS=1
           rust: stable # Only cross-compile from stable
@@ -74,7 +87,6 @@ matrix:
           env: TARGET=x86_64-apple-darwin
 
 
-# Install FUSE on OS X
 install:
     - bash ci/install.sh
 
