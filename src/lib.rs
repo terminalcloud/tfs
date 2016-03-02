@@ -26,6 +26,7 @@ extern crate slab;
 extern crate vec_map;
 extern crate variance;
 extern crate tiny_keccak as sha;
+extern crate tfs_fuse_sys as fuse;
 
 #[macro_use]
 extern crate scopeguard;
