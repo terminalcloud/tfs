@@ -189,6 +189,27 @@ impl<'id> LocalFs<'id> {
         }
     }
 
+    // Attempt to read an immutable chunk. If it's not there, do not reserve.
+    //
+    // Returns IoResult::Reserved if the chunk is not present, but does not actually reserve.
+    fn read_immutable_no_reserve(&self, id: ContentId, offset: usize, buffer: &mut [u8]) -> ::Result<IoResult> {
+        loop {
+            let chunk = self.chunks.lock().unwrap().get_refresh(&id).map(|c| c.clone());
+
+            if let Some(chunk) = chunk {
+                if let Some(index) = chunk.wait_for_read() {
+                    try!(self.file.read(&index, offset, buffer));
+                    return Ok(IoResult::Complete)
+                } else {
+                    // Chunk evicted, retry.
+                    continue
+                }
+            } else {
+                return Ok(IoResult::Reserved(id))
+            }
+        }
+    }
+
     pub fn write_immutable(&self, id: ContentId, data: &[u8]) -> ::Result<()> {
         debug!("Completing an earlier reservation on immutable chunk with: id={:?}", id);
         let chunk = self.chunks.lock().unwrap().get_refresh(&id).map(|c| c.clone())
@@ -211,7 +232,7 @@ impl<'id> LocalFs<'id> {
         //   - block is currently an immutable chunk
         //     - create new reserved MutableChunk
         //     - throw reserved error, resume at finish_mutable_write after
-        //       read_immutable
+        //       read_immutable_no_reserve
 
         debug!("Writing to mutable chunk {:?}/{:?} at offset={:?}",
                volume, block, offset);
@@ -285,7 +306,7 @@ impl<'id> LocalFs<'id> {
             // Try to read the data locally.
             let mut block_data = vec![0; BLOCK_SIZE];
 
-            match try!(self.read_immutable(id, 0, &mut block_data)) {
+            match try!(self.read_immutable_no_reserve(id, 0, &mut block_data)) {
                 // The data was already available locally.
                 IoResult::Complete => {
                     debug!("Found data locally, writing back to mutable chunk.");

@@ -171,13 +171,6 @@ impl<'id> Fs<'id> {
                     .fold(Err(::Error::NotFound), |res, cache| {
                         res.or_else(|_| cache.read(id, read_buffer))
                     }).and_then(|_| {
-                        // FIXME(#6): If the first write_immutable fails, the mutable
-                        // chunk will remain Reserved forever! Probably fix by
-                        // not needing an intermediate ImmutableChunk.
-
-                        // Write back the data we got to our local fs.
-                        try!(self.local.write_immutable(id, read_buffer));
-
                         // Finally finish our mutable write.
                         self.local.finish_mutable_write(volume, block,
                                                         read_buffer,
