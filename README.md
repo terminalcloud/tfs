@@ -15,9 +15,7 @@ It provides:
   - [ ] Integration with FUSE to mount block devices on the host filesystem
   - [ ] A convenient, high-level CLI for interacting with said block devices
 
-## Documentation
-
-Clone the repo, run `cargo doc --open`. Hosted documentation coming soon.
+## [Documentation](https://crates.fyi/crates/tfs/0.1.1)
 
 ## Releases
 
