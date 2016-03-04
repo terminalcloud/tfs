@@ -15,7 +15,7 @@ It provides:
   - [ ] Integration with FUSE to mount block devices on the host filesystem
   - [ ] A convenient, high-level CLI for interacting with said block devices
 
-## [Documentation](https://crates.fyi/crates/tfs/0.1.1)
+## [Documentation](https://crates.fyi/crates/tfs/0.1.3)
 
 ## Releases
 
