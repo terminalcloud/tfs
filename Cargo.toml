@@ -2,6 +2,9 @@
 name = "tfs"
 version = "0.1.0"
 authors = ["Jonathan Reem <jonathan.reem@gmail.com>"]
+description = "Fast, content-addressed, snapshottable filesystem."
+repository = "https://github.com/terminalcloud/tfs"
+documentation = "https://crates.fyi/crates/tfs"
 license = "GPL-3.0+"
 
 [lib]
