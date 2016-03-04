@@ -3,6 +3,7 @@ name = "tfs-fuse-sys"
 version = "0.1.1"
 authors = ["Jonathan Reem <jonathan.reem@gmail.com>"]
 description = "Low-level, incomplete fuse bindings for use in tfs."
+documentation = "https://crates.fyi/crates/tfs-fuse-sys/0.1.1"
 repository = "https://github.com/terminalcloud/tfs"
 license = "GPL-3.0+"
 build = "build.rs"
