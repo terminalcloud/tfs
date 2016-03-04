@@ -26,6 +26,12 @@ built and uploaded to github releases, where they are available for free use.
 
 See [HACKING.md](HACKING.md) for instructions.
 
+## Contributing
+
+`tfs` is subject to the Cloudlabs Contributor License Agreement (CCLA). When you
+make a pull request with any proposed changes, a github bot will ask you to agree
+to the CCLA if you have not already.
+
 ## License
 
 Licensed under the GPL Version 3.
