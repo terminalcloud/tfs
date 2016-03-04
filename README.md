@@ -2,7 +2,7 @@
 critical components, does not yet support all core features, and is likely
 to have bugs! Take care!
 
-# TFS
+# TFS [![Build Status](https://travis-ci.org/terminalcloud/tfs.svg?branch=master)](https://travis-ci.org/terminalcloud/tfs)
 
 ## Overview
 
