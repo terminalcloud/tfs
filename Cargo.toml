@@ -16,6 +16,7 @@ doctest = false
 name = "tfs"
 path = "src/main.rs"
 doctest = false
+doc = false
 
 [dependencies]
 scoped-pool = "0.1"
