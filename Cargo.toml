@@ -1,6 +1,6 @@
 [package]
 name = "tfs"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["Jonathan Reem <jonathan.reem@gmail.com>"]
 description = "Fast, content-addressed, snapshottable filesystem."
 repository = "https://github.com/terminalcloud/tfs"
