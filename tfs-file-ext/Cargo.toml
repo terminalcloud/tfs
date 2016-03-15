@@ -1,0 +1,15 @@
+[package]
+name = "tfs-file-ext"
+version = "0.1.0"
+authors = ["Jonathan Reem <jonathan.reem@gmail.com>"]
+description = "Extensions to fs::File for use in tfs."
+documentation = "https://crates.fyi/crates/tfs-file-ext/0.1.0"
+repository = "https://github.com/terminalcloud/tfs"
+license = "GPL-3.0+"
+
+[dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "2"
+
