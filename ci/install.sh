@@ -4,7 +4,7 @@ set -ex
 
 # Install FUSE if we are on osx.
 if [ "$TRAVIS_OS_NAME" == "osx" ]; then
-    brew update && brew install osxfuse;
+    brew install Caskroom/cask/osxfuse
 fi
 
 # Install libraries for cross-compiling if we are cross-compiling:

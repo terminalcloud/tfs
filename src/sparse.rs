@@ -13,12 +13,13 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+use fext::{FileExt, SparseFileExt};
+
 use slab::Slab;
 use variance::InvariantLifetime;
 
 use std::sync::Mutex;
 use std::fs::File;
-use std::io;
 
 pub const BLOCK_SIZE: usize = 2048;
 
@@ -94,7 +95,8 @@ impl<'id> IndexedSparseFile<'id> {
                 "requested read larger than block size - offset: {:?} > {:?}",
                 buffer.len(), BLOCK_SIZE - offset);
 
-        try!(self.file.pread(BLOCK_SIZE * index.index() + offset, buffer));
+        let real_offset = BLOCK_SIZE * index.index() + offset;
+        try!(self.file.read_at(real_offset as u64, buffer));
 
         Ok(())
     }
@@ -106,7 +108,8 @@ impl<'id> IndexedSparseFile<'id> {
                 "requested write larger than block size - offset: {:?} > {:?}",
                 buffer.len(), BLOCK_SIZE - offset);
 
-        try!(self.file.pwrite(BLOCK_SIZE * index.index() + offset, buffer));
+        let real_offset = BLOCK_SIZE * index.index() + offset;
+        try!(self.file.write_at(real_offset as u64, buffer));
 
         Ok(())
     }
@@ -120,7 +123,7 @@ impl<'id> IndexedSparseFile<'id> {
     }
 
     pub fn deallocate(&self, index: Index<'id>) -> ::Result<()> {
-        try!(self.file.punch(index.index() * BLOCK_SIZE, BLOCK_SIZE));
+        try!(self.file.punch((index.index() * BLOCK_SIZE) as u64, BLOCK_SIZE));
         self.allocator.deallocate(index);
         Ok(())
     }
@@ -149,98 +152,11 @@ impl<'id> IndexAllocator<'id> {
     }
 }
 
-/// Extension methods available on sparse files.
-pub trait SparseFileExt {
-    /// Punch a hole in the file with the given size at the passed offset.
-    fn punch(&self, offset: usize, size: usize) -> io::Result<()>;
-
-    /// Read from the file at the given offset.
-    fn pread(&self, offset: usize, buf: &mut [u8]) -> io::Result<usize>;
-
-    /// Write to the file at the given offset.
-    fn pwrite(&self, offset: usize, data: &[u8]) -> io::Result<usize>;
-}
-
-impl SparseFileExt for File {
-    #[cfg(target_os = "linux")]
-    fn punch(&self, offset: usize, size: usize) -> io::Result<()> {
-        use libc::{fallocate, FALLOC_FL_PUNCH_HOLE, FALLOC_FL_KEEP_SIZE};
-        use std::os::unix::io::AsRawFd;
-
-        unsafe {
-            cvt(fallocate(self.as_raw_fd(),
-                          FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE,
-                          offset as ::libc::off_t,
-                          size as ::libc::off_t) as ::libc::c_int) }.map(|_| ())
-    }
-
-    #[cfg(not(target_os = "linux"))]
-    /// WARNING: Implemented using zeroing on the system this documentation was generated for.
-    fn punch(&self, offset: usize, size: usize) -> io::Result<()> {
-        self.pwrite(offset, &vec![0; size]).map(|_| ())
-    }
-
-    fn pread(&self, offset: usize, buf: &mut [u8]) -> io::Result<usize> {
-        use libc::pread;
-        use std::os::unix::io::AsRawFd;
-
-        unsafe { cvt(pread(self.as_raw_fd(),
-                           buf.as_mut_ptr() as *mut ::libc::c_void,
-                           buf.len(),
-                           offset as ::libc::off_t) as ::libc::c_int) }
-    }
-
-    fn pwrite(&self, offset: usize, data: &[u8]) -> io::Result<usize> {
-        use libc::pwrite;
-        use std::os::unix::io::AsRawFd;
-
-        unsafe { cvt(pwrite(self.as_raw_fd(),
-                            data.as_ptr() as *const ::libc::c_void,
-                            data.len(),
-                            offset as ::libc::off_t) as ::libc::c_int) }
-    }
-}
-
-// Shim for converting C-style errors to io::Errors.
-fn cvt(err: ::libc::c_int) -> io::Result<usize> {
-    if err < 0 {
-        Err(io::Error::last_os_error())
-    } else {
-        Ok(err as usize)
-    }
-}
-
 #[cfg(test)]
 mod test {
     use tempfile::tempfile;
 
-    use sparse::{SparseFileExt, IndexedSparseFile, BLOCK_SIZE};
-
-    #[test]
-    fn test_sparse_file_ext() {
-        let file = tempfile().unwrap();
-        file.pwrite(50, &[1, 2, 3, 4, 5]).unwrap();
-        file.pwrite(100, &[7, 6, 5, 4, 3, 2, 1]).unwrap();
-
-        let mut buf = &mut [0; 5];
-        file.pread(50, buf).unwrap();
-        assert_eq!(buf, &[1, 2, 3, 4, 5]);
-
-        let mut buf = &mut [0; 7];
-        file.pread(100, buf).unwrap();
-        assert_eq!(buf, &[7, 6, 5, 4, 3, 2, 1]);
-
-        // Punched data is read as zeroed.
-        let mut buf = &mut [1; 5];
-        file.punch(50, 5).unwrap();
-        file.pread(50, buf).unwrap();
-        assert_eq!(buf, &[0; 5]);
-
-        // Data at the later offset still present after punch.
-        let mut buf = &mut [0; 7];
-        file.pread(100, buf).unwrap();
-        assert_eq!(buf, &[7, 6, 5, 4, 3, 2, 1]);
-    }
+    use sparse::{IndexedSparseFile, BLOCK_SIZE};
 
     #[test]
     fn test_sparse_file_write_read_evict() {
