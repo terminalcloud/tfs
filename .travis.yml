@@ -14,6 +14,8 @@ matrix:
     allow_failures:
         # FIXME(#9): i686-unknown-linux-gnu cross compile is broken
         - env: TARGET=i686-unknown-linux-gnu RUST=stable PKG_CONFIG_ALLOW_CROSS=1
+        # FIXME(#13): Cross-compiled fuse not available?
+        - env: TARGET=x86_64-unknown-linux-musl RUST=stable PKG_CONFIG_ALLOW_CROSS=1
 
     # Our actual builds
     include:
@@ -38,11 +40,14 @@ matrix:
 
         # OS X i686-apple-darwin
         - os: osx
+          osx_image: osx10.11
           env: TARGET=i686-apple-darwin RUST=stable PKG_CONFIG_ALLOW_CROSS=1
           rust: stable # Only cross-compile from stable
 
         # Linux x86_64-unknown-linux-musl
+        # FIXME(#13): Cross-compiled fuse not available?
         - os: linux
+          dist: trusty
           env: TARGET=x86_64-unknown-linux-musl RUST=stable PKG_CONFIG_ALLOW_CROSS=1
           rust: stable
           addons:
@@ -54,6 +59,7 @@ matrix:
 
         # Linux x86_64-unknown-linux-gnu
         - os: linux
+          dist: trusty
           env: TARGET=x86_64-unknown-linux-gnu RUST=stable
           rust: stable
           addons:
@@ -61,6 +67,7 @@ matrix:
               packages:
                 - libfuse-dev
         - os: linux
+          dist: trusty
           env: TARGET=x86_64-unknown-linux-gnu
           rust: beta
           addons:
@@ -68,6 +75,7 @@ matrix:
               packages:
                 - libfuse-dev
         - os: linux
+          dist: trusty
           env: TARGET=x86_64-unknown-linux-gnu
           rust: nightly
           addons:
@@ -77,12 +85,15 @@ matrix:
 
         # OS X x86_64-apple-darwin
         - os: osx
+          osx_image: osx10.11
           rust: stable
           env: TARGET=x86_64-apple-darwin RUST=stable
         - os: osx
+          osx_image: osx10.11
           rust: beta
           env: TARGET=x86_64-apple-darwin
         - os: osx
+          osx_image: osx10.11
           rust: nightly
           env: TARGET=x86_64-apple-darwin
 
