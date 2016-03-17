@@ -27,7 +27,7 @@ extern crate vec_map;
 extern crate variance;
 extern crate tiny_keccak as sha;
 
-extern crate tfs_fuse_sys as fuse;
+extern crate fuse;
 extern crate tfs_file_ext as fext;
 
 #[macro_use]
@@ -40,6 +40,8 @@ extern crate log;
 extern crate tempfile;
 #[cfg(test)]
 extern crate tempdir;
+#[cfg(test)]
+extern crate time;
 
 use uuid::Uuid;
 use std::collections::HashMap;
@@ -399,6 +401,150 @@ mod test {
 
         assert_eq!(storage.get_snapshot(&target_name).unwrap(),
                    expected);
+    }
+
+    #[test]
+    fn test_fuse_basic_run_exit() {
+        use fuse::{Filesystem, Session, channel};
+
+        struct Mock;
+        impl Filesystem for Mock { }
+
+        let tempdir = ::tempdir::TempDir::new("tfs-fuse-basic-run-exit-test").unwrap();
+        let mountpoint = tempdir.path().to_path_buf();
+
+        let pool = ::scoped_pool::Pool::new(1);
+        defer!(pool.shutdown());
+
+        let mut se = Session::new(Mock, &mountpoint, &[]);
+
+        pool.scoped(|scope| {
+            scope.execute(|| { se.run() });
+
+            ::std::thread::sleep(::std::time::Duration::new(1, 0));
+            defer!(channel::unmount(&mountpoint).unwrap());
+        });
+    }
+
+    #[test]
+    fn test_fuse_hello() {
+        use scoped_pool::Pool;
+
+        use std::io::Read;
+        use std::path::{Path, PathBuf};
+        use std::time::Duration;
+        use std::fs::File;
+        use std::thread;
+
+        use time::Timespec;
+
+        use fuse::channel;
+        use fuse::{FileType, Session, FileAttr, Filesystem, Request,
+                   ReplyData, ReplyEntry, ReplyAttr, ReplyDirectory};
+
+        const TTL: Timespec = Timespec { sec: 1, nsec: 0 };
+
+        const CREATE_TIME: Timespec = Timespec { sec: 100, nsec: 0 };
+
+        const HELLO_DIR_ATTR: FileAttr = FileAttr {
+            ino: 1,
+            size: 0,
+            blocks: 0,
+            atime: CREATE_TIME,
+            mtime: CREATE_TIME,
+            ctime: CREATE_TIME,
+            crtime: CREATE_TIME,
+            kind: FileType::Directory,
+            perm: 0o755,
+            nlink: 2,
+            uid: 501,
+            gid: 20,
+            rdev: 0,
+            flags: 0,
+        };
+
+        const HELLO_TXT_CONTENT: &'static str = "Hello World!\n";
+
+        const HELLO_TXT_ATTR: FileAttr = FileAttr {
+            ino: 2,
+            size: 13,
+            blocks: 1,
+            atime: CREATE_TIME,
+            mtime: CREATE_TIME,
+            ctime: CREATE_TIME,
+            crtime: CREATE_TIME,
+            kind: FileType::RegularFile,
+            perm: 0o644,
+            nlink: 1,
+            uid: 501,
+            gid: 20,
+            rdev: 0,
+            flags: 0,
+        };
+
+        struct Hello;
+
+        impl Filesystem for Hello{
+            fn lookup(&mut self, _req: &Request, parent: u64,
+                      name: &Path, reply: ReplyEntry) {
+                if parent == 1 && name.to_str() == Some("hello.txt") {
+                    reply.entry(&TTL, &HELLO_TXT_ATTR, 0);
+                } else {
+                    reply.error(::libc::ENOENT);
+                }
+            }
+
+            fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
+                match ino {
+                    1 => reply.attr(&TTL, &HELLO_DIR_ATTR),
+                    2 => reply.attr(&TTL, &HELLO_TXT_ATTR),
+                    _ => reply.error(::libc::ENOENT),
+                }
+            }
+
+            fn read(&mut self, _req: &Request, ino: u64, _fh: u64,
+                    offset: u64, _size: u32, reply: ReplyData) {
+                if ino == 2 {
+                    reply.data(&HELLO_TXT_CONTENT.as_bytes()[offset as usize..]);
+                } else {
+                    reply.error(::libc::ENOENT);
+                }
+            }
+
+            fn readdir(&mut self, _req: &Request, ino: u64, _fh: u64,
+                       offset: u64, mut reply: ReplyDirectory) {
+                if ino == 1 {
+                    if offset == 0 {
+                        reply.add(1, 0, FileType::Directory, ".");
+                        reply.add(1, 1, FileType::Directory, "..");
+                        reply.add(2, 2, FileType::RegularFile, "hello.txt");
+                    }
+                    reply.ok();
+                } else {
+                    reply.error(::libc::ENOENT);
+                }
+            }
+        }
+
+        let tmp = ::tempdir::TempDir::new("tfs-fuse-test-hello").unwrap();
+        let mountpoint = tmp.path().to_path_buf();
+
+        let pool = Pool::new(2);
+        defer!(pool.shutdown());
+
+        let path = PathBuf::from(mountpoint);
+        let mut se = Session::new(Hello, &path, &[]);
+        pool.scoped(|scope| {
+            scope.execute(|| { se.run() });
+
+            thread::sleep(Duration::new(1, 0));
+            defer!(channel::unmount(&path).unwrap());
+
+            let mut buf = vec![0; HELLO_TXT_CONTENT.len()];
+            let mut file = File::open(path.join("hello.txt")).unwrap();
+            file.read(&mut buf).unwrap();
+            assert_eq!(HELLO_TXT_CONTENT.as_bytes(), &*buf);
+        });
     }
 }
 
