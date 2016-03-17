@@ -33,7 +33,8 @@ variance = "0.1"
 tiny-keccak = "1"
 scopeguard = "0.1"
 
-tfs-fuse-sys = { path = "tfs-fuse-sys", version = "0.1" }
+fuse = { git = "https://github.com/reem/rust-fuse" }
+
 tfs-file-ext = { path = "tfs-file-ext", version = "0.1" }
 
 # TODO: Move this back to dev-dependencies.
@@ -41,6 +42,7 @@ tempdir = "0.3"
 
 [dev-dependencies]
 tempfile = "2.0"
+time = "*"
 
 [features]
 default = []
