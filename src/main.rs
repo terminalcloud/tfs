@@ -22,6 +22,10 @@ use tfs::local::Options;
 use tfs::mock::MockStorage;
 use tfs::{VolumeName, VolumeMetadata, BlockIndex, ContentId};
 
+const TEST_UID: u32 = 88;
+const TEST_GID: u32 = 24;
+const TEST_PERMISSIONS: u16 = 0o777;
+
 fn gen_random_block(block_size: usize) -> (ContentId, Vec<u8>) {
     let data = (0..block_size).map(|_| ::rand::random::<u8>()).collect::<Vec<_>>();
     let id = ContentId::hash(&data);
@@ -43,7 +47,12 @@ fn main() {
 
     Fs::run(12, options, Box::new(MockStorage::new()), Vec::new(), |fs, scope| {
         let name = VolumeName("test-volume".to_string());
-        let metadata = VolumeMetadata { size: 10 };
+        let metadata = VolumeMetadata {
+            size: 20,
+            uid: TEST_UID,
+            gid: TEST_GID,
+            permissions: TEST_PERMISSIONS
+        };
         let vol_id = fs.create(&name, metadata).unwrap();
 
         println!("Created volume {:?} with id {:?}", name, vol_id);

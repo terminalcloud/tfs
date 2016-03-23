@@ -66,6 +66,17 @@ impl Error {
             e => panic!("Not concurrent-snapshot error: {:?}!", e)
         }
     }
+
+    /// Get the error code most appropriate for this error.
+    pub fn as_c_error(&self) -> ::libc::c_int {
+        match *self {
+            Error::NotFound => ::libc::ENOENT,
+            Error::AlreadyExists => ::libc::EEXIST,
+            Error::AlreadyFrozen => ::libc::EEXIST,
+            Error::ConcurrentSnapshot => ::libc::EBUSY,
+            Error::Io(ref e) => e.raw_os_error().unwrap_or(::libc::EIO)
+        }
+    }
 }
 
 impl From<io::Error> for Error {

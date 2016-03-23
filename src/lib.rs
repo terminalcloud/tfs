@@ -16,7 +16,6 @@
 //! Lazy, peer-to-peer immutable object store.
 
 extern crate rand;
-extern crate uuid;
 extern crate libc;
 extern crate terminal_linked_hash_map;
 extern crate shared_mutex;
@@ -26,6 +25,7 @@ extern crate slab;
 extern crate vec_map;
 extern crate variance;
 extern crate tiny_keccak as sha;
+extern crate time;
 
 extern crate fuse;
 extern crate tfs_file_ext as fext;
@@ -40,10 +40,7 @@ extern crate log;
 extern crate tempfile;
 #[cfg(test)]
 extern crate tempdir;
-#[cfg(test)]
-extern crate time;
 
-use uuid::Uuid;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::fmt;
@@ -58,6 +55,7 @@ pub mod mock;
 pub mod error;
 pub mod local;
 
+mod fuser;
 mod impls;
 mod util;
 
@@ -65,11 +63,7 @@ mod util;
 pub struct BlockIndex(pub usize);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct VolumeId(Uuid);
-
-impl VolumeId {
-    pub fn new() -> Self { VolumeId(Uuid::new_v4()) }
-}
+pub struct VolumeId(pub u64);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ContentId([u8; 32]);
@@ -93,7 +87,10 @@ pub struct VolumeName(pub String);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct VolumeMetadata {
-    pub size: usize
+    pub size: usize,
+    pub uid: u32,
+    pub gid: u32,
+    pub permissions: u16
 }
 
 #[derive(Debug)]
@@ -144,6 +141,10 @@ mod test {
 
     use {VolumeName, VolumeMetadata, BlockIndex, Snapshot, ContentId, Storage};
 
+    const TEST_UID: u32 = 88;
+    const TEST_GID: u32 = 24;
+    const TEST_PERMISSIONS: u16 = 0o777;
+
     #[test]
     fn test_create_write_read() {
         let tempdir = ::tempdir::TempDir::new("tfs-test").unwrap();
@@ -156,7 +157,12 @@ mod test {
 
         Fs::run(12, options, Box::new(MockStorage::new()), Vec::new(), |fs, scope| {
             let name = VolumeName("test-volume".to_string());
-            let metadata = VolumeMetadata { size: 10 };
+            let metadata = VolumeMetadata {
+                size: 20,
+                uid: TEST_UID,
+                gid: TEST_GID,
+                permissions: TEST_PERMISSIONS
+            };
             let vol_id = fs.create(&name, metadata).unwrap();
 
             for i in 0..10 {
@@ -191,7 +197,12 @@ mod test {
         Fs::run(12, options, Box::new(MockStorage::new()), Vec::new(), |fs, scope| {
             for name in 0..10 {
                 let name = VolumeName(format!("test-volume{}", name));
-                let metadata = VolumeMetadata { size: 10 };
+                let metadata = VolumeMetadata {
+                    size: 20,
+                    uid: TEST_UID,
+                    gid: TEST_GID,
+                    permissions: TEST_PERMISSIONS
+                };
                 let vol_id = fs.create(&name, metadata).unwrap();
 
                 for i in 0..10 {
@@ -227,7 +238,12 @@ mod test {
         Fs::run(12, options, Box::new(MockStorage::new()), Vec::new(), |fs, _scope| {
             let original = VolumeName("original".to_string());
             let fork = VolumeName("fork".to_string());
-            let metadata = VolumeMetadata { size: 20 };
+            let metadata = VolumeMetadata {
+                size: 20,
+                uid: TEST_UID,
+                gid: TEST_GID,
+                permissions: TEST_PERMISSIONS
+            };
 
             // Create a volume, write to it.
             let original_id = fs.create(&original, metadata).unwrap();
@@ -286,7 +302,12 @@ mod test {
                 let original = VolumeName("original".to_string());
                 let fork = VolumeName("fork".to_string());
                 let another_fork = VolumeName("fork2".to_string());
-                let metadata = VolumeMetadata { size: 20 };
+                let metadata = VolumeMetadata {
+                    size: 20,
+                    uid: TEST_UID,
+                    gid: TEST_GID,
+                    permissions: TEST_PERMISSIONS
+                };
 
                 // Create a volume, write to it.
                 let original_id = fs1.create(&original, metadata).unwrap();
@@ -351,7 +372,12 @@ mod test {
 
                 // Just do some actions to make sure the Fs is still ok.
                 let name = VolumeName("x".to_string());
-                let metadata = VolumeMetadata { size: 20 };
+                let metadata = VolumeMetadata {
+                    size: 20,
+                    uid: TEST_UID,
+                    gid: TEST_GID,
+                    permissions: TEST_PERMISSIONS
+                };
 
                 let id = fs.create(&name, metadata).unwrap();
                 fs.write(&id, BlockIndex(3), 5, &[1, 5, 6, 7, 8, 8, 9]).unwrap();
@@ -374,7 +400,12 @@ mod test {
         let storage = MockStorage::new();
         let start_name = VolumeName("test".to_string());
         let target_name = VolumeName("snapshot".to_string());
-        let metadata = VolumeMetadata { size: 10 };
+        let metadata = VolumeMetadata {
+            size: 20,
+            uid: TEST_UID,
+            gid: TEST_GID,
+            permissions: TEST_PERMISSIONS
+        };
 
         let block = BlockIndex(5);
         let offset = 2;

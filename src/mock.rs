@@ -139,6 +139,10 @@ impl<S: Storage> StorageFuzzer<S> {
     /// pattern of actions taken by the Fs then verifying that the Storage behaves
     /// in the expected way.
     pub fn check_properties(&self, magnitude: usize) {
+        const TEST_UID: u32 = 120;
+        const TEST_GID: u32 = 16;
+        const TEST_PERMISSIONS: u16 = 0o377;
+
         // We will create this many worker threads for controlling
         // this many objects. Each object is only manipulated by one thread.
         let num_objects = magnitude * 100;
@@ -180,7 +184,12 @@ impl<S: Storage> StorageFuzzer<S> {
 
         // Create a snapshot referencing only content-ids we previously uploaded.
         let snapshot = Snapshot {
-            metadata: VolumeMetadata { size: num_objects },
+            metadata: VolumeMetadata {
+                size: num_objects,
+                uid: TEST_UID,
+                gid: TEST_GID,
+                permissions: TEST_PERMISSIONS
+            },
             blocks: objects.keys().enumerate()
                 .map(|(index, &id)| (BlockIndex(index), id)).collect()
         };

@@ -5,7 +5,7 @@ use scoped_pool::Scope;
 
 use std::fs::OpenOptions;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock, Mutex, MutexGuard};
 use std::io::Write;
 use std::path::PathBuf;
@@ -30,6 +30,7 @@ pub struct LocalFs<'id> {
     config: Options,
     file: IndexedSparseFile<'id>,
 
+    volume_ids: AtomicUsize,
     names: SharedMap<VolumeName, VolumeId>,
     volumes: SharedMap<VolumeId, RwLock<Volume<'id>>>,
     chunks: Mutex<ImmutableChunkMap<'id>>,
@@ -70,6 +71,8 @@ impl<'id> LocalFs<'id> {
             config: config,
             file: indexed,
 
+            // Start allocating from 2, 1 is reserved for / and 0 is null.
+            volume_ids: AtomicUsize::new(2),
             volumes: RwLock::new(HashMap::new()),
             names: RwLock::new(HashMap::new()),
             chunks: Mutex::new(LinkedHashMap::new()),
@@ -83,21 +86,22 @@ impl<'id> LocalFs<'id> {
                   metadata: VolumeMetadata) -> ::Result<VolumeId> {
         // If there is no id for this volume generate one and keep track of it.
         self.names.if_then(|names| !names.contains_key(&volume),
-                           |names| names.insert(volume.clone(),
-                                                VolumeId::new()));
+                           |names| {
+            let id = VolumeId(self.volume_ids.fetch_add(1, Ordering::SeqCst) as u64);
+            names.insert(volume.clone(), id);
 
-        // Load the id for this name.
-        let id = *self.names.read().unwrap().get(&volume).unwrap();
+            id
+        }).ok_or(::Error::AlreadyExists).map(|id| {
+            // Just insert, since we know all ids are unique.
+            self.volumes.write().unwrap()
+                .insert(id, RwLock::new(Volume::new(volume, metadata)));
 
-        // Just insert, since we "know" all ids are unique.
-        self.volumes.write().unwrap()
-            .insert(id, RwLock::new(Volume::new(volume, metadata)));
-
-        Ok(id)
+            id
+        })
     }
 
     pub fn open(&self, volume: VolumeName, snapshot: Snapshot) -> ::Result<VolumeId> {
-        let id = VolumeId::new();
+        let id = VolumeId(self.volume_ids.fetch_add(1, Ordering::SeqCst) as u64);
 
         // Just create a new anonymous volume here.
         self.volumes.write().unwrap()
@@ -149,6 +153,13 @@ impl<'id> LocalFs<'id> {
             debug!("Read of mutable chunk complete.");
             Ok(IoResult::Complete)
         }
+    }
+
+    /// Get the metadata of a volume.
+    pub fn stat(&self, volume: &VolumeId) -> ::Result<VolumeMetadata> {
+        self.volumes.read().unwrap()
+            .get(volume).ok_or(::Error::NotFound)
+            .map(|volume| volume.read().unwrap().metadata)
     }
 
     // Read the data associated with this content id.

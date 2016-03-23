@@ -21,7 +21,6 @@ doc = false
 [dependencies]
 scoped-pool = "0.1"
 rand = "0.3"
-uuid = "0.1"
 libc = "0.2"
 shared-mutex = "0.2"
 terminal-linked-hash-map = "0.1"
@@ -32,6 +31,7 @@ vec_map = "0.4"
 variance = "0.1"
 tiny-keccak = "1"
 scopeguard = "0.1"
+time = "0.1"
 
 fuse = { git = "https://github.com/reem/rust-fuse" }
 
@@ -42,7 +42,6 @@ tempdir = "0.3"
 
 [dev-dependencies]
 tempfile = "2.0"
-time = "*"
 
 [features]
 default = []
