@@ -348,6 +348,30 @@ mod test {
     }
 
     #[test]
+    fn test_duplicate_create() {
+        let tempdir = ::tempdir::TempDir::new("tfs-test").unwrap();
+        let options = Options {
+            mount: tempdir.path().into(),
+            size: 100,
+            flush_threads: 4,
+            sync_threads: 4
+        };
+
+        Fs::run(12, options, Box::new(MockStorage::new()), Vec::new(), |fs, _scope| {
+            let name = VolumeName("blah blah".into());
+            let metadata = VolumeMetadata {
+                size: 20,
+                uid: TEST_UID,
+                gid: TEST_GID,
+                permissions: TEST_PERMISSIONS
+            };
+
+            fs.create(&name, metadata).unwrap();
+            fs.create(&name, metadata).unwrap_err().assert_already_exists();
+        }).unwrap();
+    }
+
+    #[test]
     #[should_panic]
     fn test_fs_run_panic() {
         let tempdir = ::tempdir::TempDir::new("tfs-test").unwrap();
