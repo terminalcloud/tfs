@@ -146,8 +146,14 @@ impl<'id> LocalFs<'id> {
         }).ok_or(::Error::NotFound).and_then(|x| x));
 
         if let Some(id) = id {
-            debug!("Reading immutable chunk with: id={:?}", id);
-            self.read_immutable(id, offset, buffer)
+            if id == ContentId::null() {
+                debug!("Reading null chunk, writing zeroes.");
+                for b in buffer.iter_mut() { *b = 0; }
+                Ok(IoResult::Complete)
+            } else {
+                debug!("Reading immutable chunk with: id={:?}", id);
+                self.read_immutable(id, offset, buffer)
+            }
         } else {
             // Mutable chunk case.
             debug!("Read of mutable chunk complete.");

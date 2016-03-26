@@ -185,6 +185,33 @@ mod test {
     }
 
     #[test]
+    fn test_empty_read() {
+        let tempdir = ::tempdir::TempDir::new("tfs-test").unwrap();
+        let options = Options {
+            mount: tempdir.path().into(),
+            size: 100,
+            flush_threads: 4,
+            sync_threads: 4
+        };
+
+        Fs::run(12, options, Box::new(MockStorage::new()), Vec::new(), |fs, _scope| {
+            let name = VolumeName("test-volume".to_string());
+            let metadata = VolumeMetadata {
+                size: 20,
+                uid: TEST_UID,
+                gid: TEST_GID,
+                permissions: TEST_PERMISSIONS
+            };
+            let vol_id = fs.create(&name, metadata).unwrap();
+
+            let expected: &[u8] = &[0u8; 50];
+            let mut buf: &mut [u8] = &mut [18u8; 50];
+            fs.read(&vol_id, BlockIndex(12), 20, buf).unwrap();
+            assert_eq!(&*expected, &*buf);
+        }).unwrap();
+    }
+
+    #[test]
     fn test_multi_volume() {
         let tempdir = ::tempdir::TempDir::new("tfs-test").unwrap();
         let options = Options {
