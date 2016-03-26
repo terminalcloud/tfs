@@ -168,6 +168,11 @@ impl<'id> LocalFs<'id> {
             .map(|volume| volume.read().unwrap().metadata)
     }
 
+    /// Reads the ids of all open volumes.
+    pub fn list_volumes(&self) -> Vec<VolumeId> {
+        self.volumes.read().unwrap().keys().cloned().collect()
+    }
+
     // Read the data associated with this content id.
     //
     // Can return IoResult::Reserved if the data is not present.

@@ -134,7 +134,7 @@ impl<'id> Fs<'id> {
                     .fold(Err(::Error::NotFound), |res, cache| {
                         debug!("Got {:?}", res);
                         res.or_else(|_| {
-                            debug!("Trying {:?}", cache);
+                            trace!("Trying {:?}", cache);
                             cache.read(id, read_buffer)
                         })
                     }).and_then(|_| {

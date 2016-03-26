@@ -21,7 +21,10 @@ use variance::InvariantLifetime;
 use std::sync::Mutex;
 use std::fs::File;
 
-pub const BLOCK_SIZE: usize = 2048;
+// Must be larger than the page size.
+//
+// For efficiency, should be a multiple of the page size.
+pub const BLOCK_SIZE: usize = 4096 * 16;
 
 pub struct IndexedSparseFile<'id> {
     file: File,
